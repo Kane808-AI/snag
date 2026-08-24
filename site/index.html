@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Snag — Turn any TikTok into something you can actually do</title>
+<meta name="description" content="Share a TikTok, get the transcript, and get back a recipe, a business idea, or step-by-step instructions. Save the good ones. Free to start.">
+<style>
+  :root{
+    --bg:#0c0e14; --panel:#141821; --line:#222836; --text:#e8ecf4;
+    --muted:#94a0b8; --accent:#5b8cff; --accent2:#22d3a6; --warn:#ffb020;
+    --radius:16px; --max:1040px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  .wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+  .btn{display:inline-block;background:var(--accent);color:#fff;font-weight:600;padding:14px 26px;border-radius:999px;text-decoration:none;transition:transform .12s ease}
+  .btn:hover{transform:translateY(-2px)}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+  header{padding:22px 0;border-bottom:1px solid var(--line)}
+  header .wrap{display:flex;align-items:center;justify-content:space-between}
+  .logo{font-weight:800;letter-spacing:-.02em;font-size:20px}
+  .logo span{color:var(--accent)}
+  .tag{color:var(--muted);font-size:13px}
+  /* hero */
+  .hero{padding:84px 0 48px;text-align:center}
+  .hero h1{font-size:clamp(34px,6vw,60px);line-height:1.05;letter-spacing:-.03em;font-weight:800;max-width:18ch;margin:0 auto 20px}
+  .hero h1 em{font-style:normal;color:var(--accent2)}
+  .hero p.sub{font-size:clamp(17px,2.4vw,21px);color:var(--muted);max-width:60ch;margin:0 auto 32px}
+  .cta-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .micro{margin-top:16px;color:var(--muted);font-size:14px}
+  /* demo card */
+  .demo{margin:56px auto 0;max-width:680px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;text-align:left}
+  .demo .bar{padding:12px 18px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
+  .demo .body{padding:22px}
+  .bubble{background:#0f1320;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px;font-size:15px}
+  .bubble .who{color:var(--accent);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+  .bubble.bot .who{color:var(--accent2)}
+  .bubble code{color:var(--warn)}
+  .pills{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .pill{font-size:13px;border:1px solid var(--line);border-radius:999px;padding:6px 12px;color:var(--muted)}
+  /* sections */
+  section{padding:64px 0}
+  h2{font-size:clamp(26px,4vw,38px);letter-spacing:-.02em;text-align:center;margin-bottom:14px}
+  .lead{color:var(--muted);text-align:center;max-width:60ch;margin:0 auto 44px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:26px}
+  .card h3{font-size:18px;margin-bottom:8px}
+  .card p{color:var(--muted);font-size:15px}
+  .step-n{display:inline-flex;width:34px;height:34px;align-items:center;justify-content:center;border-radius:50%;background:rgba(91,140,255,.15);color:var(--accent);font-weight:700;margin-bottom:12px}
+  /* pricing */
+  .price-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;max-width:760px;margin:0 auto}
+  .price{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:30px}
+  .price.pro{border-color:var(--accent)}
+  .price .amt{font-size:40px;font-weight:800;letter-spacing:-.02em}
+  .price .amt small{font-size:15px;color:var(--muted);font-weight:500}
+  .price ul{list-style:none;margin:18px 0;color:var(--muted)}
+  .price li{padding:7px 0;border-bottom:1px solid var(--line)}
+  .price li::before{content:"✓";color:var(--accent2);margin-right:10px;font-weight:700}
+  .badge{display:inline-block;background:rgba(34,211,166,.15);color:var(--accent2);font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;margin-bottom:10px}
+  footer{border-top:1px solid var(--line);padding:40px 0;color:var(--muted);font-size:14px;text-align:center}
+  @media(max-width:760px){.grid,.price-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="logo">Snag</div>
+    <div class="tag">a Brand75 product</div>
+  </div>
+</header>
+
+<div class="wrap">
+  <section class="hero">
+    <h1>Turn any TikTok into <em>something you can actually do</em>.</h1>
+    <p class="sub">Share a video. Get the transcript, plus the recipe, the business idea, or the step-by-step. Save the good ones to a vault you can search later.</p>
+    <div class="cta-row">
+      <a class="btn" href="https://t.me/tttest75bot">Start free on Telegram</a>
+      <a class="btn ghost" href="#how">See how it works</a>
+    </div>
+    <p class="micro">10 free videos a month. No trial traps, cancel anytime.</p>
+
+    <div class="demo">
+      <div class="bar">Telegram · Snag bot</div>
+      <div class="body">
+        <div class="bubble">
+          <div class="who">You</div>
+          tiktok.com/t/a8kqZ2…
+        </div>
+        <div class="bubble bot">
+          <div class="who">Snag</div>
+          <strong>Content type:</strong> recipe<br>
+          <strong>Ingredients:</strong> 2 cups flour, 3 eggs, 1 cup sugar…<br>
+          <strong>Steps:</strong> 1. Whisk dry. 2. Fold in eggs. 3. Bake 18 min at 350°F.<br>
+          <div class="pills">
+            <span class="pill">🍳 Recipe</span>
+            <span class="pill">💡 Business</span>
+            <span class="pill">✅ Steps</span>
+            <span class="pill">💾 Save to vault</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <h2>Three taps, no app to install</h2>
+    <p class="lead">It lives in Telegram, so there's nothing to download. Forward a video and you get an answer.</p>
+    <div class="grid">
+      <div class="card"><div class="step-n">1</div><h3>Share a TikTok</h3><p>Send the link, or save the video and send the file. The bot pulls it even when the usual downloaders fail.</p></div>
+      <div class="card"><div class="step-n">2</div><h3>The AI reads it</h3><p>It transcribes the audio and reads the on-screen text. So it still works on silent recipe and tip videos where other tools come back empty.</p></div>
+      <div class="card"><div class="step-n">3</div><h3>Get the action</h3><p>A clean recipe, a business idea with first steps, or a do-it-now checklist. Tap to save it and find it later.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Not another creator tool</h2>
+    <p class="lead">Other apps help you make more TikToks. Snag helps you do the thing in the video. Cook the meal, start the side hustle, follow the tutorial.</p>
+    <div class="grid">
+      <div class="card"><h3>Any video, not just recipes</h3><p>Recipes, business breakdowns, workouts, how-tos, product picks. It detects what the video is and gives you the right output.</p></div>
+      <div class="card"><h3>Reads what's on screen</h3><p>Tons of videos have no narration. The value is the text overlay. Snag reads it, so you never get an empty result.</p></div>
+      <div class="card"><h3>A vault that remembers</h3><p>Every saved idea is searchable. Stop screenshotting videos you'll never find again.</p></div>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <h2>Simple pricing</h2>
+    <p class="lead">Start free. Upgrade when you're hooked.</p>
+    <div class="price-grid">
+      <div class="price">
+        <h3>Free</h3>
+        <div class="amt">$0</div>
+        <ul>
+          <li>10 videos a month</li>
+          <li>Recipe, business, and steps modes</li>
+          <li>Searchable idea vault</li>
+        </ul>
+        <a class="btn ghost" href="https://t.me/tttest75bot">Start free</a>
+      </div>
+      <div class="price pro">
+        <span class="badge">Most popular</span>
+        <h3>Pro</h3>
+        <div class="amt">$7.99<small>/mo</small></div>
+        <ul>
+          <li>Unlimited videos</li>
+          <li>Longer videos</li>
+          <li>Priority processing</li>
+          <li>No trial traps, cancel anytime</li>
+        </ul>
+        <a class="btn" href="https://t.me/tttest75bot">Go Pro</a>
+      </div>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <div class="wrap">Snag · a Brand75 product · <a href="https://brand75.com">brand75.com</a></div>
+</footer>
+</body>
+</html>

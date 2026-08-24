@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd template for the Snag bot (Hermes build, long-polling, no inbound port).
+  Install:
+    cp deploy/com.hermes.snag.plist ~/Library/LaunchAgents/
+    chmod +x deploy/run.sh
+    launchctl load ~/Library/LaunchAgents/com.hermes.snag.plist
+  Reads credentials from the project .env via config.py — none are stored here.
+  NOTE: this uses the SAME @tttest75bot token as the OpenClaw com.brand75.tokaction
+  service. Do not run both at once — they will fight over updates. Unload the
+  OpenClaw one first, or point this build at a fresh bot token.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hermes.snag</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/chriskaneshiro/.hermes/workspace/snag/deploy/run.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/chriskaneshiro/.hermes/workspace/snag/logs/bot.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/chriskaneshiro/.hermes/workspace/snag/logs/bot.err.log</string>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

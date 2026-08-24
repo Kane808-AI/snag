@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Snag — Road to Launch</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --surface: #14171c;
+    --surface-2: #181c22;
+    --border: #242932;
+    --ink: #e6e8eb;
+    --muted: #8b919b;
+    --faint: #5b626d;
+    --done: #34d399;
+    --done-bg: rgba(52, 211, 153, 0.10);
+    --next: #fbbf24;
+    --next-bg: rgba(251, 191, 36, 0.10);
+    --todo: #6b7280;
+    --deferred: #f87171;
+    --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .board {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 40px 32px 56px;
+  }
+
+  /* Header */
+  .kicker {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--next);
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-size: 30px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin-bottom: 12px;
+  }
+  .end-goal {
+    color: var(--muted);
+    font-size: 15px;
+    max-width: 640px;
+    margin-bottom: 28px;
+  }
+  .end-goal strong { color: var(--ink); font-weight: 600; }
+
+  /* Progress */
+  .progress { margin-bottom: 36px; }
+  .progress-track {
+    height: 6px;
+    background: var(--surface-2);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .progress-fill {
+    height: 100%;
+    width: 11.11%;
+    background: var(--next);
+    border-radius: 3px;
+  }
+  .progress-label {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .progress-label b { color: var(--ink); font-weight: 600; }
+
+  /* Goal cards */
+  .goals { display: flex; flex-direction: column; gap: 14px; }
+  .goal {
+    display: grid;
+    grid-template-columns: 44px 1fr;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    gap: 4px;
+  }
+  .goal.is-next { border-color: rgba(251,191,36,0.45); }
+  .goal-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding-top: 2px;
+  }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--todo);
+  }
+  .goal.done .dot { background: var(--done); box-shadow: 0 0 0 4px var(--done-bg); }
+  .goal.next .dot { background: var(--next); box-shadow: 0 0 0 4px var(--next-bg); }
+  .gid {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--faint);
+    letter-spacing: 0.04em;
+  }
+
+  .goal-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .goal-head h2 {
+    font-size: 17px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+  .pill {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 10px;
+    border-radius: 20px;
+    border: 1px solid;
+  }
+  .pill.done { color: var(--done); border-color: var(--done); background: var(--done-bg); }
+  .pill.next { color: var(--next); border-color: var(--next); background: var(--next-bg); }
+  .pill.todo { color: var(--muted); border-color: var(--border); background: var(--surface-2); }
+
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  .cols.single { grid-template-columns: 1fr; }
+  .col h3 {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 8px;
+  }
+  .col ul { list-style: none; }
+  .col li {
+    position: relative;
+    padding-left: 20px;
+    color: var(--muted);
+    font-size: 14px;
+    margin-bottom: 6px;
+  }
+  .col.done li { color: var(--ink); }
+  .col.done li::before {
+    content: "";
+    position: absolute;
+    left: 2px; top: 6px;
+    width: 9px; height: 5px;
+    border-left: 2px solid var(--done);
+    border-bottom: 2px solid var(--done);
+    transform: rotate(-45deg);
+  }
+  .col.needed li::before {
+    content: "";
+    position: absolute;
+    left: 4px; top: 8px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--faint);
+  }
+  .col li code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    padding: 0 5px;
+    border-radius: 4px;
+  }
+  .col.done li code { color: var(--ink); }
+
+  /* Deferred footer */
+  .deferred {
+    margin-top: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--deferred);
+    border-radius: 10px;
+    padding: 16px 20px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .deferred strong { color: var(--ink); font-weight: 600; }
+  .deferred .sep { color: var(--faint); padding: 0 4px; }
+
+  @media (max-width: 640px) {
+    .board { padding: 28px 18px 40px; }
+    .cols { grid-template-columns: 1fr; }
+    h1 { font-size: 25px; }
+  }
+</style>
+</head>
+<body>
+<div class="board">
+
+  <header>
+    <div class="kicker">Snag · Road to Launch</div>
+    <h1>Nine goals between here and live.</h1>
+    <p class="end-goal">
+      <strong>End goal:</strong> paying users, a loop validated by strangers, a live
+      landing page, a beta that clears its gates, then a public launch. The web app
+      waits until beta proves people want it.
+    </p>
+    <div class="progress">
+      <div class="progress-track"><div class="progress-fill"></div></div>
+      <div class="progress-label"><span><b>1</b> of 9 goals complete</span><span>8 remaining</span></div>
+    </div>
+  </header>
+
+  <main class="goals">
+
+    <section class="goal done">
+      <div class="goal-rail"><span class="dot"></span><span class="gid">G0</span></div>
+      <div class="goal-body">
+        <div class="goal-head"><h2>Architecture</h2><span class="pill done">Done</span></div>
+        <div class="cols single">
+          <div class="col done">
+            <h3>Done</h3>
+            <ul>
+              <li>Async seam: receive → acknowledge instantly → SQLite <code>jobs</code> queue → worker</li>
+              <li>Nightly vault backup (2:30 AM PT, 14-day retention)</li>
+              <li>Local faster-whisper transcription, ElevenLabs fast path</li>
+              <li>60 tests green</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="goal next is-next">
+      <div class="goal-rail"><span class="dot"></span><span class="gid">G1</span></div>
+      <div class="goal-body">
+        <div class="goal-head"><h2>Positioning + ICP</h2><span class="pill next">Next · this week</span></div>
+        <div class="cols">
+          <div class="col done">
+            <h3>Done</h3>
+            <ul><li>Recommended category + draft position drafted (GTM playbook Phase 2)</li></ul>
+          </div>
+          <div class="col needed">
+            <h3>Needed</h3>
+            <ul>
+              <li>Agree the category: "turns saved videos into your next action"</li>
+              <li>Write the one-sentence position</li>
+              <li>Name the ICP (one person, not a demographic)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="goal next">
+      <div class="goal-rail"><span class="dot"></span><span class="gid">G2</span></div>
+      <div class="goal-body">
+        <div class="goal-head"><h2>Build in public</h2><span class="pill next">Next · parallel</span></div>
+        <div class="cols">
+          <div class="col done">
+            <h3>Done</h3>
+            <ul><li>None yet</li></ul>
+          </div>
+          <div class="col needed">
+            <h3>Needed</h3>
+            <ul>
+              <li>Claim the X handle, post the dogfood loop 2-3x/week</li>
+              <li>Share numbers transparently</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="goal">
+      <div class="goal-rail"><span class="dot"></span><span class="gid">G3</span></div>
+      <div class="goal-body">
+        <div class="goal-head"><h2>Validate the loop</h2><span class="pill todo">Not started</span></div>
+        <div class="cols">
+          <div class="col done">
+            <h3>Done</h3>
+            <ul><li>Live bot is the demo asset (Increment 0)</li></ul>
+          </div>
+          <div class="col needed">
+            <h3>Needed</h3>
+            <ul>
+              <li>10-15 Mom-Test interviews + 5 willingness-to-pay</li>
+              <li>Gate: 5+ describe "saves pile up, nothing happens" in their own words</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="goal">
+      <div class="goal-rail"><span class="dot"></span><span class="gid">G4</span></div>
+      <div class="goal-body">
+        <div class="goal-head"><h2>Ship the MVP (Increment 1)</h2><span class="pill todo">Not started</span></div>
+        <div class="cols">
+          <div class="col done">
+            <h3>Done</h3>
+            <ul><li>Increment 0 (engine + bot) live</li></ul>
+          </div>
+          <div class="col needed">
+            <h3>Needed</h3>
+            <ul>
+              <li>F1-F12 chat tier, Actions queue (F6) first</li>
+              <li>Ship: walkthrough completes without you reading code</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="goal">
+      <div class="goal-rail"><span class="dot"></span><span class="gid">G5</span></div>
+      <div class="goal-body">
+        <div class="goal-head"><h2>Landing page + early access</h2><span class="pill todo">Not started</span></div>
+        <div class="cols">
+          <div class="col done">
+            <h3>Done</h3>
+            <ul><li>None yet</li></ul>
+          </div>
+          <div class="col needed">
+            <h3>Needed</h3>
+            <ul>
+              <li>One page: 10s demo GIF, "Open in Telegram" CTA, email capture</li>
+              <li>Ship: a stranger goes page → working capture in under 60s</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="goal">
+      <div class="goal-rail"><span class="dot"></span><span class="gid">G6</span></div>
+      <div class="goal-body">
+        <div class="goal-head"><h2>Closed beta</h2><span class="pill todo">Not started</span></div>
+        <div class="cols">
+          <div class="col done">
+            <h3>Done</h3>
+            <ul><li>None yet</li></ul>
+          </div>
+          <div class="col needed">
+            <h3>Needed</h3>
+            <ul>
+              <li>20-30 active users, hand-recruited</li>
+              <li>Gates: activation ≥40%, week-2 ≥30%, willingness-to-pay ≥30%</li>
+              <li>Web app only on vault-size signal</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="goal">
+      <div class="goal-rail"><span class="dot"></span><span class="gid">G7</span></div>
+      <div class="goal-body">
+        <div class="goal-head"><h2>Launch</h2><span class="pill todo">Not started</span></div>
+        <div class="cols">
+          <div class="col done">
+            <h3>Done</h3>
+            <ul><li>None yet</li></ul>
+          </div>
+          <div class="col needed">
+            <h3>Needed</h3>
+            <ul>
+              <li>Show HN → Product Hunt → TikTok demos → creator outreach</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="goal">
+      <div class="goal-rail"><span class="dot"></span><span class="gid">G8</span></div>
+      <div class="goal-body">
+        <div class="goal-head"><h2>Post-launch: distribute + retain</h2><span class="pill todo">Not started</span></div>
+        <div class="cols">
+          <div class="col done">
+            <h3>Done</h3>
+            <ul><li>None yet</li></ul>
+          </div>
+          <div class="col needed">
+            <h3>Needed</h3>
+            <ul>
+              <li>Organic channels: TikTok, Telegram ecosystem, communities</li>
+              <li>Weekly feedback loop; digest (F21) as the retention surface</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="deferred">
+    <strong>Deferred — your call, no action until decided:</strong>
+    Stripe keys<span class="sep">·</span>bot token off <code>@tttest75bot</code><span class="sep">·</span>legal/entity.
+    Pricing is tested in beta, not deferred. Web app + hosting wait for beta signal.
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# Secrets / credentials — NEVER commit
+.env
+
+# Runtime data (personal vault + backups) — NEVER commit
+data/
+logs/
+
+# Dashboard build artifacts (exported vault content) — NEVER commit
+dashboard/data.json
+dashboard/last_built.json
+
+# Strategy / knowledge base — private, not public
+kb/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Node (web PWA)
+web/node_modules/
+web/.next/
+web/out/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store

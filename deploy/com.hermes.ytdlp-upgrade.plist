@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Weekly Homebrew yt-dlp upgrade, Sundays 9:00 AM local (Pacific).
+  Install:
+    cp deploy/com.hermes.ytdlp-upgrade.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.hermes.ytdlp-upgrade.plist
+  Run now: launchctl kickstart gui/$(id -u)/com.hermes.ytdlp-upgrade
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hermes.ytdlp-upgrade</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/chriskaneshiro/.hermes/workspace/snag/deploy/upgrade-ytdlp.sh</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key><integer>0</integer>
+        <key>Hour</key><integer>9</integer>
+        <key>Minute</key><integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/chriskaneshiro/.hermes/workspace/snag/logs/ytdlp-upgrade.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/chriskaneshiro/.hermes/workspace/snag/logs/ytdlp-upgrade.launchd.log</string>
+</dict>
+</plist>

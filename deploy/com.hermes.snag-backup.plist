@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Nightly Snag vault backup, daily 2:30 AM local (Pacific).
+  Runs deploy/backup_vault.sh, which snapshots the SQLite vault with
+  sqlite3 .backup (consistent even while the bot holds the DB open),
+  verifies it with quick_check, and prunes backups older than 14 days.
+  Silent disk-only job: no network, no messaging.
+
+  Install:
+    cp deploy/com.hermes.snag-backup.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.hermes.snag-backup.plist
+  Run now:
+    launchctl kickstart gui/$(id -u)/com.hermes.snag-backup
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hermes.snag-backup</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/chriskaneshiro/.hermes/workspace/snag/deploy/backup_vault.sh</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key><integer>2</integer>
+        <key>Minute</key><integer>30</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/chriskaneshiro/.hermes/workspace/snag/logs/snag-backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/chriskaneshiro/.hermes/workspace/snag/logs/snag-backup.log</string>
+</dict>
+</plist>
