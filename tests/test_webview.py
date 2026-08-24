@@ -11,6 +11,9 @@ sys.path.insert(0, str(SN))
 sys.path.insert(0, str(SN / "webview"))
 
 import api  # noqa: E402
+import server  # noqa: E402
+import config  # noqa: E402
+import db  # noqa: E402
 from conftest import make_item  # noqa: E402
 
 
@@ -69,3 +72,112 @@ def test_all_tags_ranked(fresh_db):
     make_item(1, "b", tags="github,ai")
     tags = api.all_tags()
     assert tags[0]["tag"] == "github" and tags[0]["count"] == 2
+
+
+# --- Fix 1: CORS / DNS-rebinding hardening ----------------------------------
+
+def test_host_guard_accepts_localhost_only():
+    assert server._host_ok("localhost:8476")
+    assert server._host_ok("127.0.0.1:8476")
+    assert server._host_ok("localhost")  # no port given (curl-style)
+    assert not server._host_ok("evil.com:8476")
+    assert not server._host_ok("localhost:9999")
+    assert not server._host_ok("localhost:8476.evil.com")
+    assert not server._host_ok("")
+    assert not server._host_ok("[::1]:8476")
+
+
+def _start_viewer(tmp_path, monkeypatch):
+    """Boot the real HTTP server on an ephemeral port against a fresh vault."""
+    p = tmp_path / "viewer.db"
+    monkeypatch.setattr(config, "DB_PATH", str(p))
+    db.init()
+    srv = server.HTTPServer(("127.0.0.1", 0), server.Handler)
+    monkeypatch.setattr(server, "PORT", srv.server_address[1])
+    import threading
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def test_no_wildcard_cors_and_nosniff(monkeypatch, tmp_path):
+    import http.client
+    import json
+
+    srv = _start_viewer(tmp_path, monkeypatch)
+    try:
+        port = srv.server_address[1]
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/stats", headers={"Host": f"localhost:{port}"})
+        resp = conn.getresponse()
+        body = resp.read()
+        hdrs = {k.lower(): v for k, v in resp.getheaders()}
+        conn.close()
+
+        assert resp.status == 200
+        # CORS is dropped entirely (same-origin viewer): no wildcard, no pinning
+        assert "access-control-allow-origin" not in hdrs
+        assert hdrs.get("x-content-type-options") == "nosniff"
+        assert json.loads(body)["total"] == 0
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_viewer_rejects_foreign_host_header(monkeypatch, tmp_path):
+    import http.client
+
+    srv = _start_viewer(tmp_path, monkeypatch)
+    try:
+        port = srv.server_address[1]
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        # A DNS-rebinding attacker points a remote domain at 127.0.0.1; the
+        # Host header is the only thing left to trust.
+        conn.request("GET", "/", headers={"Host": f"evil.example.com:{port}"})
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        assert resp.status == 403
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+# --- Fix 3: viewer works on a fresh machine (db.init before serve) ----------
+
+def test_viewer_api_works_on_brand_new_db_path(tmp_path, monkeypatch):
+    """api.list_items must work against a never-initialized DB after init."""
+    p = tmp_path / "brand_new.db"
+    monkeypatch.setattr(config, "DB_PATH", str(p))
+    db.init()
+    assert api.list_items() == []
+    assert api.stats()["total"] == 0
+    assert api.all_tags() == []
+
+
+def test_main_inits_db_before_serving(tmp_path, monkeypatch):
+    p = tmp_path / "fresh_machine.db"
+    monkeypatch.setattr(config, "DB_PATH", str(p))
+
+    class FakeServer:
+        def __init__(self, addr, handler):
+            self.addr = addr
+            self.handler = handler
+
+        def serve_forever(self):
+            pass
+
+    monkeypatch.setattr(server, "HTTPServer", FakeServer)
+    server.main()
+    # After main() (which calls db.init()), the schema exists and queries work.
+    assert api.list_items() == []
+    assert api.stats()["total"] == 0
+
+
+def test_db_init_is_idempotent_and_does_not_clobber_vault(tmp_path, monkeypatch):
+    p = tmp_path / "vault.db"
+    monkeypatch.setattr(config, "DB_PATH", str(p))
+    db.init()
+    vid = make_item(1, "precious")
+    db.init()  # second init on an existing vault must not drop anything
+    assert [r["id"] for r in db.all_vault()] == [vid]
+    assert api.list_items()[0]["summary"] == "precious"

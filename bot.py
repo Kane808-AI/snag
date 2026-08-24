@@ -775,12 +775,15 @@ def handle_message(msg):
         return
 
     # Any link: acknowledge instantly, queue the heavy work for the worker.
-    if _is_url(text):
+    # Accept a URL anywhere in the message ("check this https://x.com"), not
+    # only a bare link as the entire message. `first_url` returns the clean URL.
+    link = ingest.first_url(text)
+    if link:
         if not _check_quota(chat_id, user_id):
             return
         processing = send(chat_id, "Got it, working on it…")
         msg_id = processing["result"]["message_id"] if processing and processing.get("result") else None
-        db.enqueue_job(chat_id, user_id, text, kind="link", ack_message_id=msg_id)
+        db.enqueue_job(chat_id, user_id, link, kind="link", ack_message_id=msg_id)
         return
 
     # A video file / video note attached

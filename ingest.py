@@ -10,6 +10,8 @@ Every path returns an IngestResult so the analyze layer is vendor-agnostic.
 The whole point: when raw yt-dlp returns "video unavailable", a commercial vendor
 with a real proxy pool usually still gets it.
 """
+import gzip
+import io
 import json
 import re
 import shutil
@@ -246,14 +248,39 @@ VIDEO_DOMAINS = (
 
 
 def is_url(text):
-    return bool(text) and text.startswith("http")
+    """True for a bare URL whose scheme is http:// or https:// (case-insensitive).
+
+    Requires the ``://`` so bare words like "httpfoo" are not treated as links.
+    """
+    if not text:
+        return False
+    low = text.lower()
+    return low.startswith("http://") or low.startswith("https://")
+
+
+# Matches the first http(s) URL anywhere in a message, e.g. the URL inside
+# "check this https://x.com out". Case-insensitive on the scheme.
+_URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
+
+
+def first_url(text):
+    """First URL found anywhere in a message, or None if there isn't one."""
+    if not text:
+        return None
+    m = _URL_RE.search(text)
+    return m.group(0) if m else None
 
 
 def is_video_url(text):
     if not is_url(text):
         return False
-    low = text.lower()
-    return any(d in low for d in VIDEO_DOMAINS)
+    # Hostname matching, not substring: youtube.com.evil.com / notyoutube.com /
+    # ?ref=tiktok.com in the query must NOT route to the video pipeline.
+    try:
+        host = urllib.parse.urlparse(text).netloc.lower().rstrip(".")
+    except ValueError:
+        return False
+    return any(host == d or host.endswith("." + d) for d in VIDEO_DOMAINS)
 
 
 class _TextExtractor(HTMLParser):
@@ -267,6 +294,8 @@ class _TextExtractor(HTMLParser):
     BLOCK = {"p", "div", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6",
              "article", "section", "blockquote", "tr", "pre"}
 
+    _MAX_TITLE_CHARS = 500
+
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.title = ""
@@ -275,12 +304,28 @@ class _TextExtractor(HTMLParser):
         self._skip_depth = 0
         self._in_title = False
         self._title_buf = []
+        self._title_len = 0
+
+    def _finalize_title(self):
+        """Stop collecting title text and commit what we have.
+
+        Called from </title> AND from <body>, so a page with an unclosed
+        <title> (broken HTML) no longer swallows the whole body.
+        """
+        if not self.title and self._title_buf:
+            self.title = "".join(self._title_buf).strip()[:self._MAX_TITLE_CHARS]
+        self._title_buf = []
+        self._title_len = 0
+        self._in_title = False
 
     def handle_starttag(self, tag, attrs):
         if tag in self.SKIP:
             self._skip_depth += 1
         elif tag == "title":
             self._in_title = True
+        elif tag == "body":
+            # A body start tag means the head (and any broken <title>) is done.
+            self._finalize_title()
         elif tag == "meta":
             d = dict(attrs)
             key = (d.get("name") or d.get("property") or "").lower()
@@ -296,8 +341,7 @@ class _TextExtractor(HTMLParser):
         if tag in self.SKIP:
             self._skip_depth = max(0, self._skip_depth - 1)
         elif tag == "title":
-            self._in_title = False
-            self.title = self.title or "".join(self._title_buf).strip()
+            self._finalize_title()
         elif tag in self.BLOCK:
             self._chunks.append("\n")
 
@@ -305,7 +349,13 @@ class _TextExtractor(HTMLParser):
         if self._skip_depth:
             return
         if self._in_title:
-            self._title_buf.append(data)
+            # Cap the accumulated title so a pathological page can't grow
+            # unbounded memory; the cap also applies at finalize time.
+            room = self._MAX_TITLE_CHARS - self._title_len
+            if room > 0:
+                chunk = data[:room]
+                self._title_buf.append(chunk)
+                self._title_len += len(chunk)
             return
         self._chunks.append(data)
 
@@ -314,10 +364,31 @@ class _TextExtractor(HTMLParser):
         return "\n".join(ln for ln in lines if ln)
 
 
+def _close_unclosed_title(html):
+    """Close a missing </title> so the body is still parsed.
+
+    CPython's HTMLParser (3.13+) reads <title> as raw text buffered until
+    </title>, so a broken page with a missing </title> swallows everything
+    after it — the <body> tag never even fires. Insert the close tag at the
+    first <body ...> boundary so the rest of the page parses normally.
+    """
+    if "</title" in html.lower():
+        return html
+    m = re.search(r"<title\b[^>]*>", html, re.IGNORECASE)
+    if not m:
+        return html
+    rest = html[m.end():]
+    b = re.search(r"<body\b", rest, re.IGNORECASE)
+    if not b:
+        return html
+    cut = m.end() + b.start()
+    return html[:cut] + "</title>" + html[cut:]
+
+
 def _html_to_text(html):
     p = _TextExtractor()
     try:
-        p.feed(html)
+        p.feed(_close_unclosed_title(html))
     except Exception:
         pass
     head = []
@@ -334,32 +405,92 @@ def _html_to_text(html):
 _MAX_PAGE_BYTES = 2_000_000
 _MAX_TEXT_CHARS = 8000
 
+# Content types we refuse to treat as text, with a friendly message. Keeps
+# PDFs / images / archives / raw binaries from becoming mojibake notes.
+_UNSUPPORTED_CTYPES = {
+    "application/pdf", "application/octet-stream", "application/zip", "application/gzip",
+}
+_UNSUPPORTED_CTYPE_PREFIXES = ("image/", "video/", "audio/")
+_HTML_CTYPES = {"text/html", "application/xhtml+xml"}
+
+
+def _looks_binary(text):
+    """True when a decoded payload is mostly control / replacement characters.
+
+    U+FFFD appears for every undecodable UTF-8 byte; \x00-\x08 are control
+    bytes that never appear in real prose. A high ratio means mojibake, not
+    text, so the caller should treat it as unreadable.
+    """
+    if not text:
+        return False
+    bad = sum(1 for ch in text if ch == "\ufffd" or "\x00" <= ch <= "\x08")
+    return bad / len(text) > 0.30
+
+
+def _gunzip(data, limit):
+    """Decompress gzip bytes, capping output at `limit`. None on failure."""
+    out = bytearray()
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as gz:
+            while True:
+                chunk = gz.read(65536)
+                if not chunk:
+                    break
+                out += chunk
+                if len(out) >= limit:
+                    break
+    except Exception:
+        return None
+    return bytes(out[:limit])
+
 
 def fetch_text(url):
     """Fetch a URL and extract readable text. Returns (ok, text, error).
 
-    Handles HTML (title + description + body) and plain text. Caps the output
-    so a huge page never blows the note prompt.
+    Handles HTML (title + description + body) and plain text. Accepts gzip
+    (Content-Encoding / magic bytes) transparently, whitelists text/* and
+    application/xhtml+xml content types, rejects binary payloads with a
+    friendly error, and caps the output so a huge page never blows the note
+    prompt.
     """
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        req = urllib.request.Request(url, headers={
+            "User-Agent": UA,
+            "Accept-Encoding": "gzip",
+        })
         with urllib.request.urlopen(req, timeout=30) as r:
-            ctype = (r.headers.get("Content-Type") or "").lower()
+            ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             data = r.read(_MAX_PAGE_BYTES)
     except Exception as e:
         return False, "", repr(e)
+
+    # Transparent gzip: some servers send gzip with the wrong/absent
+    # Content-Encoding header, so sniff the magic bytes as well.
+    if data[:2] == b"\x1f\x8b":
+        data = _gunzip(data, _MAX_PAGE_BYTES)
+        if data is None:
+            return False, "", "couldn't decompress that response"
+
+    # Content-type gate: whitelist text/* and XHTML; reject obvious binaries.
+    if ctype:
+        if ctype in _UNSUPPORTED_CTYPES or ctype.startswith(_UNSUPPORTED_CTYPE_PREFIXES):
+            return False, "", f"this file type isn't supported yet ({ctype})"
+        if not (ctype.startswith("text/") or ctype in _HTML_CTYPES):
+            return False, "", f"this file type isn't supported yet ({ctype})"
 
     try:
         html = data.decode("utf-8", errors="replace")
     except Exception:
         html = data.decode("latin-1", errors="replace")
 
-    if "text/html" in ctype or "<html" in html[:500].lower():
+    if ctype in _HTML_CTYPES or "<html" in html[:500].lower():
         text = _html_to_text(html)
     else:
         text = html.strip()
 
+    if _looks_binary(text):
+        return False, "", "couldn't read that content (binary or garbled data)"
+
     if not text.strip():
         return False, "", "no readable text on that page"
     return True, text.strip()[:_MAX_TEXT_CHARS], ""
-

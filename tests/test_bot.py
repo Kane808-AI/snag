@@ -436,3 +436,16 @@ def test_text_url_fetch_failure_is_friendly(fresh_db, fake_api, no_billing,
     rejection = edited(fake_api)[-1][1]
     assert "couldn't read that page" in rejection["text"]
     assert db.list_vault(1) == []
+
+
+def test_mid_message_url_is_captured(fresh_db, fake_api, no_billing, monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(bot.ingest, "is_video_url", lambda url: False)
+    monkeypatch.setattr(bot.ingest, "fetch_text",
+                        lambda url: (True, "article body text", ""))
+    bot.handle_message(msg("hey check this out: https://example.com/some-article"))
+    assert "working on it" in fake_api.calls[0][1]["text"]
+    # the enqueued job carries the clean URL, not the whole message
+    with sqlite3.connect(str(fresh_db)) as c:
+        (source_url,) = c.execute("SELECT source_url FROM jobs").fetchone()
+    assert source_url == "https://example.com/some-article"

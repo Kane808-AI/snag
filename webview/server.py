@@ -22,18 +22,41 @@ from urllib.parse import urlparse, parse_qs
 
 _THIS = Path(__file__).resolve().parent            # webview/
 sys.path.insert(0, str(_THIS))                     # for `import api`
+sys.path.insert(0, str(_THIS.parent))              # for `import db`
 
 import api  # noqa: E402
+import db   # noqa: E402
 
 ROOT = _THIS
 PORT = 8476
+
+# DNS-rebinding guard: only these Host names may reach the viewer. The browser
+# always sends "Host: localhost:8476" (or 127.0.0.1:8476) for this server, so
+# any other Host header — including a rebinding attack that points a remote
+# domain at 127.0.0.1 — is refused.
+_ALLOWED_HOSTS = ("localhost", "127.0.0.1")
+
+
+def _host_ok(host_header):
+    """Accept only localhost / 127.0.0.1, optionally with the right port."""
+    if not host_header:
+        return False
+    host = host_header.strip().lower()
+    if host.startswith("["):  # IPv6 literal — never allowed here
+        return False
+    name = host
+    if ":" in host:
+        name, _, port = host.rpartition(":")
+        if not port.isdigit() or int(port) != PORT:
+            return False
+    return name in _ALLOWED_HOSTS
 
 
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code, data, content_type="application/json"):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -43,12 +66,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Length", "0")
         self.end_headers()
 
     def do_GET(self):
+        if not _host_ok(self.headers.get("Host", "")):
+            return self._json(403, {"error": "bad host"})
+
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
@@ -87,6 +112,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    # Ensure the schema exists even if the bot has never run on this machine.
+    # Idempotent: CREATE TABLE IF NOT EXISTS — never clobbers an existing vault.
+    db.init()
     print(f"Snag web viewer at http://localhost:{PORT}")
     HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 
