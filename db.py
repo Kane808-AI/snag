@@ -216,7 +216,7 @@ def quota_left(telegram_id):
     return max(0, config.FREE_MONTHLY_LIMIT - month_usage(telegram_id))
 
 
-def save_note(telegram_id, source_url, note, transcript, triage):
+def save_note(telegram_id, source_url, note, transcript, triage, content_type="video"):
     """Store the full enriched note + triage. Returns the new row id."""
     with _conn() as c:
         cur = c.execute(
@@ -233,7 +233,7 @@ def save_note(telegram_id, source_url, note, transcript, triage):
                 note.get("recommendations", ""),
                 ",".join(note.get("tags", [])),
                 transcript,
-                triage.get("action_type", "Just reference"),
+                content_type,
                 triage.get("stage", "Inbox"),
                 triage.get("action_type", "Just reference"),
                 triage.get("impact", 3),

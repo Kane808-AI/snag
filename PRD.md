@@ -9,21 +9,21 @@ Supersedes: the June 5, 2026 feature spec (HANDOFF_2026-06-05-1200-snag-prd-prep
 
 ## 1. Positioning & value prop
 
-Snag is a Telegram bot that turns a TikTok link into a transcript, an actionable note, and a searchable vault entry.
+Snag is a Telegram bot that turns any link into a note and a searchable vault entry. Anything you can find on the internet, you can Snag: a website, an article, an X/Instagram/Facebook post, a TikTok, a YouTube video, an image, a PDF. The name is the product: snag it all.
 
-**One-line value prop:** Send a TikTok, get the idea back. Transcript, summary, why it matters, and what to do next, saved to a vault you can actually search.
+**One-line value prop:** Send anything, get the idea back. Summary, why it matters, and what to do next, saved to a vault you can actually search.
 
 The marketing line from launch prep still holds: "Your saved folder is a graveyard. Snag fixes that. Tap share, hit Snag, it saves the link, pulls a summary, and tags it automatically. One place. Actually searchable."
 
-This is a capture app, not a social app. The job is to make a saved TikTok cost nothing to find again and force a decision on it: act, reference, or discard.
+This is a capture app, not a social app. The job is to make anything you save cost nothing to find again and force a decision on it: act, reference, or discard.
 
 ## 2. Target user
 
 **Primary user is Chris.** The analysis prompts are personalized to his four businesses and the triage rubric scores against them. This is a dogfooded solo-founder tool first.
 
-The persona that generalizes: a solo operator running multiple businesses who saves dozens of TikToks a month, never rewatches them, and loses ideas in the saved-folder graveyard. The bot answers for them the way it answers for Chris: what is this, does it matter to my businesses, and what do I do next.
+The persona that generalizes: a solo operator running multiple businesses who saves links, posts, and videos from everywhere, never revisits them, and loses ideas in the saved-folder graveyard. The bot answers for them the way it answers for Chris: what is this, does it matter to my businesses, and what do I do next.
 
-Public framing for marketing: busy founders and operators who save TikToks for ideas and need a searchable idea vault with action triage, not a note-taking app for general links.
+Public framing for marketing: busy founders and operators who save links and posts from everywhere for ideas and need a searchable idea vault with action triage, not a note-taking app for general links.
 
 ## 3. Core loop
 
@@ -82,7 +82,7 @@ The loop is cost-first: text only, no video download on the primary path, no mul
 - **Multimodal video.** Sending full videos to a vision model on every capture. Removed deliberately. It was the old build's billing driver. Cost-first text strategy wins until the moat clears a real bar.
 - **Adaptive content-type modes.** The June 5 spec promised one prompt that auto-detects content type (recipe, business idea, tutorial, news) and reshapes output, plus a one-tap mode override. What exists is one strong personalized prompt with no content-type detection and no override. `modes.py` holds the two prompt constants only. The lens idea is parked.
 - **Vault chat.** Chat with a saved item (Phase 1) and chat with the whole vault via vector search / pgvector (Phase 2). No code.
-- **Multi-source capture.** iOS share sheet, Chrome extension, web form, YouTube, articles, recipes, images, PDFs. None of it exists. The June 5 launch order (web first, extension second, iOS third) was inverted: a Telegram bot shipped first because it is the lowest-friction capture surface.
+- **Multi-source capture.** Split as of 2026-08-24. Content types (YouTube, articles, posts, images, PDFs) are core scope, not parked; see §6. Capture surfaces (iOS share sheet, Chrome extension, web form) remain parked behind validation. None of it exists yet. The June 5 launch order (web first, extension second, iOS third) was inverted: a Telegram bot shipped first because it is the lowest-friction capture surface.
 - **Tiered pricing.** Pro+ at $14.99, lifetime at $99, PDF support with a 25-page cap, 30-minute video caps. None exists. One Pro price only.
 - **Manual tags and notes post-save.** The spec allowed the user to add tags and notes after saving. The bot has no such command. The vault row has a status field and the dashboard can edit status, but the bot does not.
 - **Duration cap enforcement.** `FREE_MAX_VIDEO_SECONDS` is configured (180s) but no code enforces it.
@@ -99,9 +99,15 @@ Telegram Stars was the alternative and lost on economics: ~55-70% net after Appl
 
 ## 6. Multi-channel roadmap
 
-**Live now: TikTok via Telegram.** One channel, one source type, fully working.
+**Live now: TikTok (and video file) via Telegram.** One content type fully working end to end.
 
-**Queued behind validation: X, Instagram, web clipper.** The core pipeline is channel-agnostic (URL → transcribe → analyze → vault), so each new channel is an ingest adapter plus a capture surface, not a rewrite. X and Instagram links and a web capture form are the next candidates. Each ships only after validation, meaning real demand signal, per the parked-moat rule. The June 5 spec's Phase 1 web form, Phase 2 extension, Phase 3 iOS are all downstream of that validation gate.
+**Core scope (Chris, 2026-08-24): capture any URL on the internet.** Snag is not a TikTok tool; it is a capture-anything tool. Any link, any content type: websites, articles, X/Instagram/Facebook posts, YouTube, images, PDFs. The core pipeline is URL → extract content → analyze → vault, where extract means transcribe (video), parse text (articles and posts), or OCR (images and PDFs). Content-type breadth is a first-class feature, not a gated nice-to-have.
+
+Staged honestly by engine cost:
+- Near-term (text content): articles, web pages, X/IG/FB posts, YouTube. Text extraction is cheaper than transcription, so these are easier than the video path that already ships.
+- Later (vision content): images and PDFs need OCR/vision, which the cost-first text strategy deliberately removed. Reopen on demand signal.
+
+**Capture surfaces stay downstream of validation:** iOS share sheet, browser extension, web form. These are where-you-capture, not what-you-capture. They still ship after the bot proves the loop. The June 5 order (web first, extension second, iOS third) is unchanged.
 
 Validation is not defined quantitatively yet. That is an open question.
 

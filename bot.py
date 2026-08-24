@@ -3,9 +3,10 @@ Snag Telegram bot (Hermes build). Long-polling, stdlib only.
 
 User flow:
   /start                  -> register + welcome
-  send a TikTok link      -> instant ack -> item card with triage badges
+  send any link           -> instant ack -> item card with triage badges
                              and Save/Discard, Open, Transcript buttons
-  send a TikTok video file-> local whisper -> same card
+                             (video links transcribe, text links extract)
+  send a video file       -> local whisper -> same card
   💾 Save                 -> vault, card resolves to the saved item card
   /vault                  -> recent items with status + triage badges, stage
                              filter chips, pagination
@@ -182,11 +183,8 @@ def _edit(chat_id, msg_id, text, buttons="keep"):
             return None
 
 
-TIKTOK_RE = ("tiktok.com", "vm.tiktok", "vt.tiktok")
-
-
-def _is_tiktok_link(text):
-    return text and text.startswith("http") and any(d in text for d in TIKTOK_RE)
+def _is_url(text):
+    return ingest.is_url(text)
 
 
 def _download_telegram_file(file_id):
@@ -208,7 +206,7 @@ def _check_quota(chat_id, user_id):
         return True  # pro
     if left <= 0:
         link = billing.create_checkout_link(user_id)
-        msg = (f"You've used all {config.FREE_MONTHLY_LIMIT} free videos this month. "
+        msg = (f"You've used all {config.FREE_MONTHLY_LIMIT} free captures this month. "
                f"Upgrade to **{config.BRAND_NAME} Pro** for unlimited.")
         buttons = [[{"text": "⭐ Upgrade", "url": link}]] if link else None
         send(chat_id, msg, buttons)
@@ -343,7 +341,7 @@ def _share_text(item):
 
 # --- processing --------------------------------------------------------------
 
-def _process_transcript(chat_id, user_id, transcript, source_url, msg_id):
+def _process_transcript(chat_id, user_id, transcript, source_url, msg_id, content_type="video"):
     try:
         note = analyze.analyze_note(transcript)
     except Exception as e:
@@ -361,10 +359,11 @@ def _process_transcript(chat_id, user_id, transcript, source_url, msg_id):
         if last and last.get("result"):
             msg_id = last["result"]["message_id"]
     _PENDING[(chat_id, msg_id)] = {"url": source_url, "note": note,
-                                   "transcript": transcript, "triage": triage}
+                                   "transcript": transcript, "triage": triage,
+                                   "content_type": content_type}
     db.record_usage(user_id, source_url)
     left = db.quota_left(user_id)
-    footer = "" if left is None else f"\n\n({left} free videos left this month)"
+    footer = "" if left is None else f"\n\n({left} free captures left this month)"
     _edit(chat_id, msg_id, _pending_card(note, triage) + footer, _pending_buttons())
 
 
@@ -385,6 +384,19 @@ def _process_file(chat_id, user_id, file_path, source_url, msg_id):
     _process_transcript(chat_id, user_id, transcript, source_url, msg_id)
 
 
+def _process_text_url(chat_id, user_id, url, msg_id):
+    """Text path for any non-video URL: fetch, extract, analyze. No transcription,
+    no duration gate. Feeds the same note + triage card as a video."""
+    ok, text, err = ingest.fetch_text(url)
+    if not ok:
+        _edit(chat_id, msg_id,
+              "❌ I couldn't read that page. " + (err or "")[:200] +
+              "\n\nTip: some sites block reading; try a different link or paste "
+              "the text itself.", [])
+        return
+    _process_transcript(chat_id, user_id, text, url, msg_id, content_type="article")
+
+
 def process_job(job):
     """Run one queued job. Called by the background worker thread.
 
@@ -403,6 +415,10 @@ def process_job(job):
         if job["kind"] == "file":
             path = _download_telegram_file(job["file_id"])
             _process_file(chat_id, user_id, path, url, msg_id)
+            return
+
+        if not ingest.is_video_url(url):
+            _process_text_url(chat_id, user_id, url, msg_id)
             return
 
         if _is_free(user_id):
@@ -538,18 +554,18 @@ def _cmd_plan(chat_id, user_id):
     user = db.get_user(user_id) or {}
     plan = user.get("plan", "free")
     if plan == "pro":
-        lines = ["**Plan**: Pro", "Videos this month: unlimited", "Duration limit: none"]
+        lines = ["**Plan**: Pro", "Captures this month: unlimited", "Duration limit: none"]
     else:
         used = db.month_usage(user_id)
         left = db.quota_left(user_id)
         lines = [
             "**Plan**: Free",
-            f"Videos this month: {used} of {config.FREE_MONTHLY_LIMIT}",
-            f"Videos left: {left}",
+            f"Captures this month: {used} of {config.FREE_MONTHLY_LIMIT}",
+            f"Captures left: {left}",
             f"Duration limit: {config.FREE_MAX_VIDEO_SECONDS} seconds per video",
         ]
     lines.append("")
-    lines.append("Upgrade for unlimited videos and no duration limit.")
+    lines.append("Upgrade for unlimited captures and no duration limit.")
     link = billing.create_checkout_link(user_id)
     buttons = [[{"text": "⭐ Upgrade to Pro", "url": link}]] if link else None
     send(chat_id, "\n".join(lines), buttons)
@@ -688,10 +704,11 @@ def handle_message(msg):
     if text.startswith("/start"):
         send(chat_id,
              f"👋 Welcome to **{config.BRAND_NAME}**.\n\n"
-             "Send me a TikTok link (or the video file itself) and I'll transcribe it and "
-             "turn it into an organized note: a summary, the key ideas, why it matters for "
-             "your businesses, and what to do next. Save the good ones to your vault.\n\n"
-             f"You get **{config.FREE_MONTHLY_LIMIT} free videos a month**. /vault to see saved, "
+             "Send me any link (a TikTok, a YouTube video, an article, a web page, an "
+             "X/Instagram/Facebook post) or a video file, and I'll turn it into an organized "
+             "note: a summary, the key ideas, why it matters for your businesses, and what to "
+             "do next. Save the good ones to your vault.\n\n"
+             f"You get **{config.FREE_MONTHLY_LIMIT} free captures a month**. /vault to see saved, "
              "/actions for what's worth doing next, /plan for your quota, /upgrade for unlimited.")
         return
 
@@ -757,11 +774,11 @@ def handle_message(msg):
             _cmd_delete(chat_id, user_id, vid)
         return
 
-    # A TikTok link: acknowledge instantly, queue the heavy work for the worker.
-    if _is_tiktok_link(text):
+    # Any link: acknowledge instantly, queue the heavy work for the worker.
+    if _is_url(text):
         if not _check_quota(chat_id, user_id):
             return
-        processing = send(chat_id, "🎬 Got it, working on it…")
+        processing = send(chat_id, "Got it, working on it…")
         msg_id = processing["result"]["message_id"] if processing and processing.get("result") else None
         db.enqueue_job(chat_id, user_id, text, kind="link", ack_message_id=msg_id)
         return
@@ -777,7 +794,7 @@ def handle_message(msg):
                        file_id=vid["file_id"], ack_message_id=msg_id)
         return
 
-    send(chat_id, "Send me a TikTok link or the video file and I'll get to work. /start for help.")
+    send(chat_id, "Send me any link or a video file and I'll get to work. /start for help.")
 
 
 # --- callback dispatch -------------------------------------------------------
@@ -806,10 +823,11 @@ def handle_callback(cb):
     if action == "save":
         pending = _PENDING.get((chat_id, msg_id))
         if not pending:
-            _edit(chat_id, msg_id, "That one expired, send the TikTok again.", [])
+            _edit(chat_id, msg_id, "That one expired, send it again.", [])
             return
         vid = db.save_note(user_id, pending["url"], pending["note"],
-                           pending["transcript"], pending["triage"])
+                           pending["transcript"], pending["triage"],
+                           pending.get("content_type", "video"))
         _PENDING.pop((chat_id, msg_id), None)
         item = db.get_vault_item(user_id, vid)
         _edit(chat_id, msg_id, _saved_card(item), _saved_buttons(vid))

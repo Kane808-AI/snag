@@ -50,7 +50,7 @@ def _section(text, name):
 
 def analyze_note(transcript):
     """Transcript -> structured note via DeepSeek. Returns dict of fields + raw."""
-    full = modes.NOTE_PROMPT + "\n\nTRANSCRIPT:\n" + transcript
+    full = modes.NOTE_PROMPT + "\n\nCONTENT:\n" + transcript
     raw = _call_deepseek([{"role": "user", "content": full}])
 
     tags_raw = _section(raw, "TAGS")

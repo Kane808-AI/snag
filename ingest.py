@@ -11,12 +11,14 @@ The whole point: when raw yt-dlp returns "video unavailable", a commercial vendo
 with a real proxy pool usually still gets it.
 """
 import json
+import re
 import shutil
 import subprocess
 import urllib.request
 import urllib.error
 import urllib.parse
 from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from pathlib import Path
 
 import config
@@ -229,4 +231,135 @@ def transcript_from_url(url):
     if text and text.strip():
         return True, text.strip(), ""
     return False, "", "empty transcript"
+
+
+# --- Any-URL text ingestion (capture anything, Chris 2026-08-24) ------------
+
+# Domains that route through the video pipeline (transcribe). Everything else
+# is treated as text: fetched, extracted, and analyzed directly. Instagram /
+# Facebook / X posts land on the text path (their og:title / og:description meta
+# carries the caption), which is a good first cut until reel/OCR support lands.
+VIDEO_DOMAINS = (
+    "tiktok.com", "vm.tiktok", "vt.tiktok",
+    "youtube.com", "youtu.be", "m.youtube.com",
+)
+
+
+def is_url(text):
+    return bool(text) and text.startswith("http")
+
+
+def is_video_url(text):
+    if not is_url(text):
+        return False
+    low = text.lower()
+    return any(d in low for d in VIDEO_DOMAINS)
+
+
+class _TextExtractor(HTMLParser):
+    """Strip a page to readable text: title, meta description, and body.
+
+    Skips script/style/noscript/svg/head/template. Emits newlines at block
+    boundaries so paragraphs survive. stdlib only.
+    """
+
+    SKIP = {"script", "style", "noscript", "iframe", "svg", "template"}
+    BLOCK = {"p", "div", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6",
+             "article", "section", "blockquote", "tr", "pre"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.title = ""
+        self.description = ""
+        self._chunks = []
+        self._skip_depth = 0
+        self._in_title = False
+        self._title_buf = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP:
+            self._skip_depth += 1
+        elif tag == "title":
+            self._in_title = True
+        elif tag == "meta":
+            d = dict(attrs)
+            key = (d.get("name") or d.get("property") or "").lower()
+            content = (d.get("content") or "").strip()
+            if key == "og:title" and not self.title and content:
+                self.title = content
+            elif key in ("og:description", "description") and not self.description and content:
+                self.description = content
+        elif tag in self.BLOCK:
+            self._chunks.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP:
+            self._skip_depth = max(0, self._skip_depth - 1)
+        elif tag == "title":
+            self._in_title = False
+            self.title = self.title or "".join(self._title_buf).strip()
+        elif tag in self.BLOCK:
+            self._chunks.append("\n")
+
+    def handle_data(self, data):
+        if self._skip_depth:
+            return
+        if self._in_title:
+            self._title_buf.append(data)
+            return
+        self._chunks.append(data)
+
+    def text(self):
+        lines = [re.sub(r"\s+", " ", ln).strip() for ln in "".join(self._chunks).split("\n")]
+        return "\n".join(ln for ln in lines if ln)
+
+
+def _html_to_text(html):
+    p = _TextExtractor()
+    try:
+        p.feed(html)
+    except Exception:
+        pass
+    head = []
+    if p.title:
+        head.append("TITLE: " + p.title)
+    if p.description:
+        head.append("DESCRIPTION: " + p.description)
+    body = p.text()
+    if head:
+        return "\n\n".join(head + ["", body]).strip()
+    return body
+
+
+_MAX_PAGE_BYTES = 2_000_000
+_MAX_TEXT_CHARS = 8000
+
+
+def fetch_text(url):
+    """Fetch a URL and extract readable text. Returns (ok, text, error).
+
+    Handles HTML (title + description + body) and plain text. Caps the output
+    so a huge page never blows the note prompt.
+    """
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            ctype = (r.headers.get("Content-Type") or "").lower()
+            data = r.read(_MAX_PAGE_BYTES)
+    except Exception as e:
+        return False, "", repr(e)
+
+    try:
+        html = data.decode("utf-8", errors="replace")
+    except Exception:
+        html = data.decode("latin-1", errors="replace")
+
+    if "text/html" in ctype or "<html" in html[:500].lower():
+        text = _html_to_text(html)
+    else:
+        text = html.strip()
+
+    if not text.strip():
+        return False, "", "no readable text on that page"
+    return True, text.strip()[:_MAX_TEXT_CHARS], ""
 

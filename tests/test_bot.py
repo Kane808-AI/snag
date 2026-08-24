@@ -71,7 +71,7 @@ def test_link_flow_processing_then_card(fresh_db, fake_api, stub_analysis, no_bi
     assert markup_flat(card)[:2] == ["save", "discard"]
     assert "Worth Acting On" in card["text"] and "Make content" in card["text"]
     assert "Impact 4/5 · Effort 2/5" in card["text"]
-    assert "9 free videos left" in card["text"]
+    assert "9 free captures left" in card["text"]
 
 
 def test_save_callback_stores_and_resolves_card(fresh_db, fake_api, stub_analysis, no_billing, pump):
@@ -315,9 +315,9 @@ def test_plan_free_and_pro(fresh_db, fake_api, no_billing):
     bot.handle_message(msg("/plan"))
     text = last_send_text(fake_api)
     assert "<b>Plan</b>: Free" in text
-    assert f"Videos this month: 0 of {db.config.FREE_MONTHLY_LIMIT}" in text
-    assert f"Videos left: {db.config.FREE_MONTHLY_LIMIT}" in text
-    assert "Upgrade for unlimited videos" in text
+    assert f"Captures this month: 0 of {db.config.FREE_MONTHLY_LIMIT}" in text
+    assert f"Captures left: {db.config.FREE_MONTHLY_LIMIT}" in text
+    assert "Upgrade for unlimited captures" in text
     db.set_plan(1, "pro")
     bot.handle_message(msg("/plan"))
     text = last_send_text(fake_api)
@@ -383,10 +383,56 @@ def test_file_duration_gate_rejects(fresh_db, fake_api, no_billing, monkeypatch)
 
 def test_unknown_command_help(fresh_db, fake_api, no_billing):
     bot.handle_message(msg("/nonsense"))
-    assert "Send me a TikTok link" in last_send_text(fake_api)
+    assert "Send me any link" in last_send_text(fake_api)
 
 
 def test_start_welcome(fresh_db, fake_api, no_billing):
     bot.handle_message(msg("/start"))
     assert "Welcome to" in last_send_text(fake_api)
     assert "/actions" in last_send_text(fake_api)
+
+
+# --- capture any URL: text path (articles, web pages, posts) -----------------
+
+ARTICLE_URL = "https://example.com/some-article"
+
+
+def test_text_url_flow_produces_card(fresh_db, fake_api, stub_analysis, no_billing,
+                                     monkeypatch, pump):
+    monkeypatch.setattr(bot.ingest, "is_video_url", lambda url: False)
+    monkeypatch.setattr(bot.ingest, "fetch_text",
+                        lambda url: (True, "article body text", ""))
+    # a probe_duration call on a text URL would be wrong; make it fail loudly
+    monkeypatch.setattr(bot.ingest, "probe_duration",
+                        lambda url: (_ for _ in ()).throw(AssertionError("no video probe for text")))
+    bot.handle_message(msg(ARTICLE_URL))
+    assert "working on it" in fake_api.calls[0][1]["text"]
+    assert pump() == 1
+    card = edited(fake_api)[-1][1]
+    assert "AI tools for marketers" in card["text"]  # stub note summary
+    assert "Worth Acting On" in card["text"]
+
+
+def test_text_url_save_stores_article_content_type(fresh_db, fake_api, stub_analysis,
+                                                   no_billing, monkeypatch, pump):
+    monkeypatch.setattr(bot.ingest, "is_video_url", lambda url: False)
+    monkeypatch.setattr(bot.ingest, "fetch_text",
+                        lambda url: (True, "article body text", ""))
+    bot.handle_message(msg(ARTICLE_URL))
+    pump()
+    bot.handle_callback(cb("save", 1001))
+    item = db.get_vault_item(1, 1)
+    assert item and item["content_type"] == "article"
+    assert item["summary"] == "AI tools for marketers"
+
+
+def test_text_url_fetch_failure_is_friendly(fresh_db, fake_api, no_billing,
+                                            monkeypatch, pump):
+    monkeypatch.setattr(bot.ingest, "is_video_url", lambda url: False)
+    monkeypatch.setattr(bot.ingest, "fetch_text",
+                        lambda url: (False, "", "connection refused"))
+    bot.handle_message(msg(ARTICLE_URL))
+    assert pump() == 1
+    rejection = edited(fake_api)[-1][1]
+    assert "couldn't read that page" in rejection["text"]
+    assert db.list_vault(1) == []

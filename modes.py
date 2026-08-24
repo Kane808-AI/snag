@@ -7,8 +7,9 @@ Two outputs, two prompts:
   against Chris's actual businesses, matching the OpenClaw triage rubric.
 """
 
-NOTE_PROMPT = """You are the analysis engine for Snag, a capture app that turns any
-TikTok into an organized, actionable note for Chris.
+NOTE_PROMPT = """You are the analysis engine for Snag, a capture app that turns
+anything you capture (a video, an article, a web page, or a social post) into an
+organized, actionable note for Chris.
 
 Chris runs four businesses:
 - Brand75 (AI automation agency)
@@ -16,13 +17,13 @@ Chris runs four businesses:
 - Callahan Law (DUI-defense law firm, he runs its SEO)
 - a personal TikTok about AI that he is growing
 
-Analyze the transcript below. Return EXACTLY this markdown structure and nothing else:
+Analyze the content below. Return EXACTLY this markdown structure and nothing else:
 
 **SUMMARY**
 One sentence (max 25 words) describing the core idea.
 
 **KEY IDEAS**
-3-5 bullets. The most important insights in the video.
+3-5 bullets. The most important insights in the content.
 
 **WHY IT MATTERS**
 2-3 sentences on why this idea matters for one or more of Chris's businesses, or for him personally. Be specific. If it does not map to any of his businesses, say so plainly.
@@ -37,7 +38,7 @@ Be selective. Not every interesting video deserves action. Say when something is
 
 TRIAGE_PROMPT = """You triage a saved content idea for Chris, who runs an AI automation
 agency (Brand75), a white-label CRM product (SalesBridge), a DUI-defense law firm's SEO
-(Callahan), and a personal TikTok about AI he is growing. He saved this TikTok to his idea brain.
+(Callahan), and a personal TikTok about AI he is growing. He saved this content to his idea brain.
 
 Classify it. Respond with ONLY a JSON object, no prose, no code fences:
 {{
@@ -59,4 +60,4 @@ but speculative; 1-2 = generic advice.
 
 TITLE: {title}
 SUMMARY: {summary}
-TRANSCRIPT (excerpt): {transcript}"""
+CONTENT (excerpt): {transcript}"""
