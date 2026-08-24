@@ -597,5 +597,5 @@ def pending_job_count():
 def all_vault():
     """Full vault, for the dashboard build. Returns every row, newest first."""
     with _conn() as c:
-        rows = c.execute("SELECT * FROM vault ORDER BY ts DESC").fetchall()
+        rows = c.execute("SELECT * FROM vault ORDER BY ts DESC, id DESC").fetchall()
         return [dict(r) for r in rows]

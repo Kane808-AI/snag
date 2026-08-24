@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snag — Vault</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --card-hover: #1e222b;
+    --fg: #e6e8ee;
+    --muted: #9aa1ad;
+    --border: #262b35;
+    --accent: #6c8cff;
+    --act: #22c55e;
+    --ref: #f59e0b;
+    --inbox: #64748b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 20px 12px;
+  }
+  .top { display: flex; align-items: baseline; gap: 12px; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+  #stats { color: var(--muted); font-size: 13px; }
+  #search {
+    width: 100%; margin-top: 12px; padding: 10px 12px;
+    background: var(--card); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 8px;
+    font-size: 15px; outline: none;
+  }
+  #search:focus { border-color: var(--accent); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 20px 0; }
+  .chip {
+    background: var(--card); color: var(--muted);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 5px 12px; font-size: 13px; cursor: pointer;
+  }
+  .chip.active { color: var(--fg); border-color: var(--accent); background: var(--card-hover); }
+  main { padding: 16px 20px 40px; max-width: 860px; margin: 0 auto; }
+  .empty { color: var(--muted); text-align: center; margin-top: 60px; }
+  .item {
+    display: block; width: 100%; text-align: left;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 10px;
+    cursor: pointer; color: var(--fg);
+  }
+  .item:hover { background: var(--card-hover); }
+  .item-top { display: flex; justify-content: space-between; gap: 10px; }
+  .item-summary { font-weight: 600; font-size: 15px; }
+  .item-impact { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: #262b35; color: var(--muted); }
+  .badge.stage-act { background: rgba(34,197,94,.15); color: var(--act); }
+  .badge.stage-ref { background: rgba(245,158,11,.15); color: var(--ref); }
+  .badge.stage-inbox { background: rgba(100,116,139,.2); color: var(--inbox); }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag { color: var(--accent); font-size: 12px; }
+  #detail { max-width: 860px; margin: 0 auto; padding: 16px 20px 40px; }
+  #detail h2 { font-size: 20px; margin: 12px 0 4px; }
+  #detail h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 20px 0 6px; }
+  .note { white-space: pre-wrap; color: var(--fg); margin: 0; }
+  #back { background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  a { color: var(--accent); }
+  details { margin-top: 16px; }
+  summary { cursor: pointer; color: var(--muted); }
+  pre { white-space: pre-wrap; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 13px; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="top"><h1>Snag</h1><span id="stats"></span></div>
+    <input id="search" type="search" placeholder="Search your saves…" autocomplete="off">
+    <div class="chips" id="stageChips"></div>
+  </header>
+  <main id="list"></main>
+  <section id="detail" hidden></section>
+
+<script>
+const $ = s => document.querySelector(s);
+const state = { q: "", stage: null };
+
+const esc = s => (s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const STAGES = ["Worth Acting On", "Reference", "Inbox"];
+const ICONS = { inbox:"📥", "in progress":"🔄", done:"✅", archived:"🗄️" };
+
+function stageBadge(stage) {
+  const cls = STAGES.includes(stage) ? stage.replace(/\s/g,"-").toLowerCase().replace("worth-acting-on","act").replace("reference","ref").replace("inbox","inbox") : "other";
+  return `<span class="badge stage-${cls}">${esc(stage || "Inbox")}</span>`;
+}
+function statusBadge(status) { return `<span class="badge">${ICONS[status] || "📄"} ${esc(status || "")}</span>`; }
+function tagsList(tags) {
+  return (tags || "").split(",").filter(Boolean).map(t => `<span class="tag">#${esc(t.trim())}</span>`).join("");
+}
+
+async function loadStats() {
+  const s = await (await fetch("/api/stats")).json();
+  const act = s.by_stage["Worth Acting On"] || 0;
+  $("#stats").textContent = `${s.total} saved · ${act} worth acting on`;
+}
+
+function renderList() {
+  const list = $("#list");
+  if (!state.items.length) {
+    list.innerHTML = `<p class="empty">Nothing here yet. Save a link in Telegram and it'll show up here.</p>`;
+    return;
+  }
+  list.innerHTML = state.items.map(it => `
+    <button class="item" data-id="${it.id}">
+      <div class="item-top">
+        <span class="item-summary">${esc(it.summary || "(no summary)")}</span>
+        <span class="item-impact">⚡${it.impact}/${it.effort}</span>
+      </div>
+      <div class="badges">
+        ${stageBadge(it.stage)} ${statusBadge(it.status)}
+        <span class="badge">${esc(it.action_type || "")}</span>
+      </div>
+      <div class="tags">${tagsList(it.tags)}</div>
+    </button>`).join("");
+}
+
+async function loadItems() {
+  const p = new URLSearchParams();
+  if (state.q) p.set("q", state.q);
+  if (state.stage) p.set("stage", state.stage);
+  const data = await (await fetch(`/api/items?${p}`)).json();
+  state.items = data.items || [];
+  renderList();
+  loadStats();
+}
+
+async function openItem(id) {
+  const res = await fetch(`/api/items/${id}`);
+  if (!res.ok) return;
+  const it = await res.json();
+  const d = $("#detail");
+  d.innerHTML = `
+    <button id="back">← Back</button>
+    <h2>${esc(it.summary || "(no summary)")}</h2>
+    <div class="badges">
+      ${stageBadge(it.stage)} ${statusBadge(it.status)}
+      <span class="badge">${esc(it.action_type || "")}</span>
+      <span class="badge">⚡ impact ${it.impact} / effort ${it.effort}</span>
+    </div>
+    <div class="tags">${tagsList(it.tags)}</div>
+    ${it.source_url ? `<p><a href="${esc(it.source_url)}" target="_blank" rel="noopener">Open source ↗</a></p>` : ""}
+    <h3>Key Ideas</h3><p class="note">${esc(it.key_ideas || "")}</p>
+    <h3>Why It Matters</h3><p class="note">${esc(it.why_it_matters || "")}</p>
+    <h3>Recommendations</h3><p class="note">${esc(it.recommendations || "")}</p>
+    ${it.transcript ? `<details><summary>Transcript / full text</summary><pre>${esc(it.transcript)}</pre></details>` : ""}
+  `;
+  $("#list").hidden = true;
+  d.hidden = false;
+  $("#back").onclick = () => { d.hidden = true; $("#list").hidden = false; };
+  window.scrollTo(0, 0);
+}
+
+function renderChips() {
+  const wrap = $("#stageChips");
+  const chips = [["", "All"], ...STAGES.map(s => [s, s])];
+  wrap.innerHTML = chips.map(([val, label]) =>
+    `<button class="chip ${state.stage === val ? "active" : ""}" data-stage="${val}">${label}</button>`).join("");
+  wrap.querySelectorAll(".chip").forEach(c => c.onclick = () => {
+    state.stage = c.dataset.stage || null;
+    renderChips();
+    loadItems();
+  });
+}
+
+$("#list").addEventListener("click", e => {
+  const item = e.target.closest(".item");
+  if (item) openItem(item.dataset.id);
+});
+
+let t;
+$("#search").addEventListener("input", e => {
+  clearTimeout(t);
+  t = setTimeout(() => { state.q = e.target.value.trim(); loadItems(); }, 200);
+});
+
+renderChips();
+loadItems();
+</script>
+</body>
+</html>
