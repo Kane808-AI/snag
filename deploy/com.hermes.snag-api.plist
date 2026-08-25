@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Snag web API server (read-only vault viewer backend).
+  Binds 127.0.0.1:8476 (hardcoded in webview/server.py), stdlib only.
+
+  Install:
+    cp deploy/com.hermes.snag-api.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.hermes.snag-api.plist
+  Restart:
+    launchctl kickstart -k gui/$(id -u)/com.hermes.snag-api
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hermes.snag-api</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/chriskaneshiro/.hermes/workspace/snag/deploy/run-api.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/chriskaneshiro/.hermes/workspace/snag/logs/api.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/chriskaneshiro/.hermes/workspace/snag/logs/api.err.log</string>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

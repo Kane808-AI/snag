@@ -32,9 +32,10 @@ export type SnagItem = {
   done?: boolean;
 };
 
-// In dev the API lives on the Python server (port 8476); in a production static
-// build the frontend and API share an origin, so the base is empty (relative).
-const API_BASE = import.meta.env?.DEV ? "http://localhost:8476" : "";
+// The API lives on the Python server (port 8476). The frontend is a separate
+// process (port 8080), so it always fetches the API cross-origin over localhost
+// (server.py sends Access-Control-Allow-Origin: *).
+const API_BASE = "http://localhost:8476";
 
 export function sourceTypeFromUrl(url: string): SourceType {
   const u = (url || "").toLowerCase();
