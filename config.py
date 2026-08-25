@@ -37,6 +37,7 @@ DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 # --- Product config ---
 FREE_MONTHLY_LIMIT = int(os.environ.get("FREE_MONTHLY_LIMIT", "10"))
 FREE_MAX_VIDEO_SECONDS = int(os.environ.get("FREE_MAX_VIDEO_SECONDS", "180"))  # protect margins
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")  # local transcription model size
 DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "data" / "app.db"))
 WORK_DIR = os.environ.get("WORK_DIR", "/tmp/snag")
 BRAND_NAME = os.environ.get("BRAND_NAME", "Snag")

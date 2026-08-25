@@ -464,6 +464,11 @@ def process_job(job):
             return
         if not _check_duration(chat_id, user_id, result.duration, msg_id):
             return
+        if result.native_transcript.strip():
+            # ScrapeCreators sometimes returns the transcript with the download.
+            # Use it directly and skip the local whisper pass entirely.
+            _process_transcript(chat_id, user_id, result.native_transcript, url, msg_id)
+            return
         _process_file(chat_id, user_id, result.file_path, url, msg_id)
     except Exception:
         _edit(chat_id, msg_id,

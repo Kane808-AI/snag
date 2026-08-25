@@ -127,7 +127,7 @@ def transcribe_local(file_path):
             lines = (proc.stderr or "").strip().splitlines()
             detail = lines[0] if lines else "no audio stream"
             raise RuntimeError(f"no usable audio track: {detail}")
-        model = WhisperModel("base", device="cpu", compute_type="int8")
+        model = WhisperModel(config.WHISPER_MODEL, device="cpu", compute_type="int8")
         segments, _info = model.transcribe(wav, beam_size=5)
         return " ".join([s.text for s in segments]).strip()
     finally:

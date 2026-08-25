@@ -382,6 +382,26 @@ def test_file_duration_gate_rejects(fresh_db, fake_api, no_billing, monkeypatch)
     assert "<b>500 seconds</b>" in rejection["text"]
 
 
+def test_native_transcript_skips_local_whisper(fresh_db, fake_api, stub_analysis,
+                                               no_billing, monkeypatch, pump):
+    called = []
+
+    def boom(path):
+        called.append(path)
+        raise AssertionError("must not transcribe")
+
+    monkeypatch.setattr(bot.analyze, "transcribe_local", boom)
+    monkeypatch.setattr(bot.ingest, "ingest",
+                        lambda url: bot.ingest.IngestResult(
+                            ok=True, file_path="/tmp/fake.mp4", duration=30,
+                            native_transcript="vendor supplied words",
+                            source="scrapecreators"))
+    bot.handle_message(msg(TIKTOK))
+    pump()
+    assert called == []  # local whisper was skipped
+    assert any(m == "editMessageText" for m, _p, _r in fake_api.calls)
+
+
 # --- misc --------------------------------------------------------------------
 
 def test_empty_message_gets_help(fresh_db, fake_api, no_billing):
