@@ -187,6 +187,15 @@ def _is_url(text):
     return ingest.is_url(text)
 
 
+def _looks_like_content(text):
+    """True when plain text looks like shared content (a paste), not chat."""
+    t = (text or "").strip()
+    if len(t) >= 120 or "\n" in t:
+        return True
+    endings = sum(t.count(p) for p in (".", "!", "?"))
+    return endings >= 2
+
+
 def _download_telegram_file(file_id):
     info = _api("getFile", file_id=file_id)
     fp = info["result"]["file_path"]
@@ -387,8 +396,18 @@ def _process_file(chat_id, user_id, file_path, source_url, msg_id):
 def _process_text_url(chat_id, user_id, url, msg_id):
     """Text path for any non-video URL: fetch, extract, analyze. No transcription,
     no duration gate. Feeds the same note + triage card as a video."""
+    if ingest.is_social_video(url):
+        _edit(chat_id, msg_id,
+              "❌ Instagram reels and Facebook videos need login to read. Snag can't capture those yet. Try a TikTok or YouTube link instead.", [])
+        return
     ok, text, err = ingest.fetch_text(url)
     if not ok:
+        platform = ingest.is_social_blocked(url)
+        if platform:
+            _edit(chat_id, msg_id,
+                  f"❌ {platform} blocks auto-reading. Paste the text here instead "
+                  "and I'll turn it into a note.", [])
+            return
         _edit(chat_id, msg_id,
               "❌ I couldn't read that page. " + (err or "")[:200] +
               "\n\nTip: some sites block reading; try a different link or paste "
@@ -412,6 +431,10 @@ def process_job(job):
     url = job["source_url"] or ""
 
     try:
+        if job["kind"] == "text":
+            _process_transcript(chat_id, user_id, job["source_url"] or "", "", msg_id, content_type="text")
+            return
+
         if job["kind"] == "file":
             path = _download_telegram_file(job["file_id"])
             _process_file(chat_id, user_id, path, url, msg_id)
@@ -425,12 +448,12 @@ def process_job(job):
             dur = ingest.probe_duration(url)
             if not _check_duration(chat_id, user_id, dur, msg_id):
                 return
-        ok, transcript, _terr = ingest.transcript_from_url(url)
-        if ok:
-            _process_transcript(chat_id, user_id, transcript, url, msg_id)
-            return
-        print(f"[ingest] elevenlabs source_url failed for {url}: {_terr[:300]}", flush=True)
-
+        if ingest.is_youtube(url):
+            ok, transcript, _terr = ingest.youtube_transcript(url)
+            if ok:
+                _process_transcript(chat_id, user_id, transcript, url, msg_id)
+                return
+            print(f"[ingest] youtube captions failed for {url}: {_terr[:300]}", flush=True)
         result = ingest.ingest(url)
         if not result.ok:
             print(f"[ingest] all adapters failed for {url}: {result.error[-400:]}", flush=True)
@@ -797,7 +820,19 @@ def handle_message(msg):
                        file_id=vid["file_id"], ack_message_id=msg_id)
         return
 
-    send(chat_id, "Send me any link or a video file and I'll get to work. /start for help.")
+    # Pasted text: no URL, no file. Capture the text directly (the
+    # "paste the text" path for login-walled social links) only when it
+    # looks like content, not chat. Short conversation falls through to
+    # the help message below.
+    if text.strip() and _looks_like_content(text):
+        if not _check_quota(chat_id, user_id):
+            return
+        processing = send(chat_id, "Got it, working on it…")
+        msg_id = processing["result"]["message_id"] if processing and processing.get("result") else None
+        db.enqueue_job(chat_id, user_id, text, kind="text", ack_message_id=msg_id)
+        return
+
+    send(chat_id, "Send me a link, a video, or paste the text you want to save. /start for help.")
 
 
 # --- callback dispatch -------------------------------------------------------

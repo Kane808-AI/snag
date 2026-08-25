@@ -23,7 +23,6 @@ _load_env()
 # --- Credentials (provided by Chris; never hardcode) ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")  # server-side transcription
 SCRAPECREATORS_API_KEY = os.environ.get("SCRAPECREATORS_API_KEY", "")  # optional downloader
 SCRAPTIK_API_KEY = os.environ.get("SCRAPTIK_API_KEY", "")              # optional failover (RapidAPI)
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")

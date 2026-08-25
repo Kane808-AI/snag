@@ -57,6 +57,43 @@ def test_is_video_url_real_video_host_variants():
     assert ingest.is_video_url("HTTPS://WWW.YOUTUBE.COM/watch?v=abc")
 
 
+def test_is_social_blocked_returns_platform_names():
+    assert ingest.is_social_blocked("https://facebook.com/post/123") == "Facebook"
+    assert ingest.is_social_blocked("https://www.fb.com/x") == "Facebook"
+    assert ingest.is_social_blocked("https://instagram.com/p/abc") == "Instagram"
+    assert ingest.is_social_blocked("https://x.com/user/status/1") == "X"
+    assert ingest.is_social_blocked("https://twitter.com/user/status/1") == "X"
+    assert ingest.is_social_blocked("https://linkedin.com/posts/1") == "LinkedIn"
+
+
+def test_is_social_blocked_rejects_non_social_and_lookalikes():
+    # Hostname matching, not substring: lookalikes and query refs must not match.
+    assert ingest.is_social_blocked("https://creativeatishay.in/article") is None
+    assert ingest.is_social_blocked("https://facebook.com.evil.com/x") is None
+    assert ingest.is_social_blocked("https://www.facebook.com.evil.com/x") is None
+    assert ingest.is_social_blocked("https://notx.com/1") is None
+    assert ingest.is_social_blocked("https://example.com/blog?ref=instagram.com") is None
+    assert ingest.is_social_blocked("") is None
+
+
+def test_is_social_video_instagram_reels_tv():
+    assert ingest.is_social_video("https://www.instagram.com/reel/ABC/")
+    assert ingest.is_social_video("https://www.instagram.com/reels/ABC/")
+    assert ingest.is_social_video("https://www.instagram.com/tv/ABC/")
+
+
+def test_is_social_video_facebook_watch_and_videos():
+    assert ingest.is_social_video("https://www.facebook.com/share/v/123/")
+    assert ingest.is_social_video("https://www.facebook.com/watch/?v=123")
+
+
+def test_is_social_video_rejects_text_posts_homepages_and_non_social():
+    assert not ingest.is_social_video("https://www.instagram.com/p/ABC/")
+    assert not ingest.is_social_video("https://www.instagram.com/")
+    assert not ingest.is_social_video("https://www.facebook.com/groups/x/posts/1")
+    assert not ingest.is_social_video("https://example.com/reel/foo")
+
+
 def test_html_to_text_extracts_title_description_and_body():
     html = (
         "<html><head><title>My Page</title>"

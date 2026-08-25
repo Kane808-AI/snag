@@ -26,8 +26,11 @@ def stub_analysis(monkeypatch):
               "impact": 4, "effort": 2}
     monkeypatch.setattr(bot.analyze, "analyze_note", lambda t: dict(note))
     monkeypatch.setattr(bot.analyze, "analyze_triage", lambda n: dict(triage))
-    monkeypatch.setattr(bot.ingest, "transcript_from_url",
-                        lambda url: (True, "transcript of the video", ""))
+    monkeypatch.setattr(bot.ingest, "ingest",
+                        lambda url: bot.ingest.IngestResult(
+                            ok=True, file_path="/tmp/fake.mp4", duration=30, source="yt-dlp"))
+    monkeypatch.setattr(bot.analyze, "transcribe_local",
+                        lambda path: "transcript of the video")
     monkeypatch.setattr(bot.ingest, "probe_duration", lambda url: None)
     return note, triage
 
@@ -336,7 +339,7 @@ def test_plan_upgrade_button(fresh_db, fake_api, no_billing, monkeypatch):
 def test_link_duration_gate_rejects_long_video(fresh_db, fake_api, stub_analysis,
                                                no_billing, monkeypatch, pump):
     monkeypatch.setattr(bot.ingest, "probe_duration", lambda url: 9999)
-    monkeypatch.setattr(bot.ingest, "transcript_from_url",
+    monkeypatch.setattr(bot.ingest, "ingest",
                         lambda url: (_ for _ in ()).throw(AssertionError("must not transcribe")))
     bot.handle_message(msg(TIKTOK))
     # processing message first, then the worker edits it with the rejection
@@ -381,9 +384,24 @@ def test_file_duration_gate_rejects(fresh_db, fake_api, no_billing, monkeypatch)
 
 # --- misc --------------------------------------------------------------------
 
-def test_unknown_command_help(fresh_db, fake_api, no_billing):
-    bot.handle_message(msg("/nonsense"))
-    assert "Send me any link" in last_send_text(fake_api)
+def test_empty_message_gets_help(fresh_db, fake_api, no_billing):
+    # non-content text (empty, whitespace) falls through to the fallback help
+    bot.handle_message(msg(""))
+    assert "Send me a link" in last_send_text(fake_api)
+    bot.handle_message(msg("   "))
+    assert "Send me a link" in last_send_text(fake_api)
+
+
+def test_short_chat_gets_help_not_captured(fresh_db, fake_api, no_billing, pump):
+    # conversational chat is not content: no ack, no text job, just help
+    bot.handle_message(msg("hello"))
+    assert len(sent(fake_api)) == 1
+    assert "Send me a link" in last_send_text(fake_api)
+    assert pump() == 0
+    assert edited(fake_api) == []
+    assert db.list_vault(1) == []
+    bot.handle_message(msg("thanks!"))
+    assert "Send me a link" in last_send_text(fake_api)
 
 
 def test_start_welcome(fresh_db, fake_api, no_billing):
@@ -438,6 +456,20 @@ def test_text_url_fetch_failure_is_friendly(fresh_db, fake_api, no_billing,
     assert db.list_vault(1) == []
 
 
+def test_text_url_social_loginwall_message(fresh_db, fake_api, no_billing,
+                                           monkeypatch, pump):
+    monkeypatch.setattr(bot.ingest, "is_video_url", lambda url: False)
+    monkeypatch.setattr(bot.ingest, "fetch_text",
+                        lambda url: (False, "", "HTTP Error 403: Forbidden"))
+    bot.handle_message(msg("https://facebook.com/post/123"))
+    assert pump() == 1
+    rejection = edited(fake_api)[-1][1]
+    assert "Facebook blocks auto-reading" in rejection["text"]
+    assert "Paste the text here instead" in rejection["text"]
+    assert "couldn't read that page" not in rejection["text"]
+    assert db.list_vault(1) == []
+
+
 def test_mid_message_url_is_captured(fresh_db, fake_api, no_billing, monkeypatch):
     import sqlite3
     monkeypatch.setattr(bot.ingest, "is_video_url", lambda url: False)
@@ -449,3 +481,45 @@ def test_mid_message_url_is_captured(fresh_db, fake_api, no_billing, monkeypatch
     with sqlite3.connect(str(fresh_db)) as c:
         (source_url,) = c.execute("SELECT source_url FROM jobs").fetchone()
     assert source_url == "https://example.com/some-article"
+
+
+# --- bare text capture (the "paste the text" path) ---------------------------
+
+def test_pasted_text_flow_produces_card(fresh_db, fake_api, stub_analysis, no_billing,
+                                        pump):
+    bot.handle_message(msg("A plain thought worth capturing, no link at all.\n"
+                           "Second line of the pasted article continues here."))
+    # 1. immediate ack, like the link flow
+    assert fake_api.calls[0][0] == "sendMessage"
+    assert "working on it" in fake_api.calls[0][1]["text"]
+    # 2. the worker resolves the ack into the card
+    assert pump() == 1
+    card = edited(fake_api)[-1][1]
+    assert "AI tools for marketers" in card["text"]  # stub note summary
+    assert "Worth Acting On" in card["text"]
+
+
+def test_pasted_text_save_stores_text_content_type_and_empty_source(fresh_db, fake_api,
+                                                                   stub_analysis,
+                                                                   no_billing, pump):
+    bot.handle_message(msg("Pasted text from a login-walled post.\nTwo lines here."))
+    assert pump() == 1
+    bot.handle_callback(cb("save", 1001))
+    item = db.get_vault_item(1, 1)
+    assert item and item["content_type"] == "text"
+    assert item["source_url"] == ""
+    assert item["summary"] == "AI tools for marketers"
+
+
+# --- content-vs-conversation gate ---------------------------------------------
+
+@pytest.mark.parametrize("text,expected", [
+    ("A" * 120, True),                        # long paragraph (>=120 chars)
+    ("line one\nline two", True),             # multi-line
+    ("This is a quote. It matters.", True),   # two sentence endings
+    ("hello", False),
+    ("how do I search my saves?", False),
+    ("", False),
+])
+def test_looks_like_content(text, expected):
+    assert bot._looks_like_content(text) is expected

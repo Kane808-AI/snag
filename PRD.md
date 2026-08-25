@@ -1,6 +1,6 @@
 # Snag PRD
 
-Status: **draft** (code-verified 2026-08-21 against the live Hermes build)
+Status: **draft** (code-verified 2026-08-21 against the live Hermes build; transcription stack updated 2026-08-25)
 Owner: Chris
 Build: `~/.hermes/workspace/snag` (Telegram bot, stdlib Python, launchd)
 Supersedes: the June 5, 2026 feature spec (HANDOFF_2026-06-05-1200-snag-prd-prep.md). Where that spec and the code disagree, the code wins.
@@ -27,23 +27,23 @@ Public framing for marketing: busy founders and operators who save links and pos
 
 ## 3. Core loop
 
-Save → Transcribe → Understand → Recommend.
+Save → Extract → Understand → Recommend.
 
-1. **Save.** User sends a TikTok link (tiktok.com, vm.tiktok, vt.tiktok) or uploads the video file to the bot. Quota is checked before work starts.
-2. **Transcribe.** Primary path: ElevenLabs server-side transcription (authenticated `/v1/speech-to-text`, model `scribe_v2`, `source_url` + `xi-api-key`). No video is downloaded, so TikTok's anti-scraping block never applies. This is the fix for the original bug where every download path failed. Fallback path: download via 3-tier adapter failover (ScrapeCreators → ScrapTik/RapidAPI → yt-dlp) and transcribe locally with faster-whisper (`base`, CPU int8). Uploaded files go straight to local whisper.
+1. **Save.** User sends a link or uploads a file to the bot. Quota is checked before work starts.
+2. **Extract (transcribe).** Transcription is free, no paid speech-to-text. YouTube uses native captions via yt-dlp (fast, any length). Everything else (TikTok, other video, uploaded files) downloads via 3-tier adapter failover (ScrapeCreators → ScrapTik/RapidAPI → yt-dlp) and transcribes locally with faster-whisper (`base`, CPU int8) after normalizing audio to 16kHz mono WAV with ffmpeg. Text content (articles, posts) is extracted as text, no transcription.
 3. **Understand.** DeepSeek text analysis, two passes. Pass one (`analyze_note`): summary, key ideas, why it matters for Chris's businesses, recommendations, tags. Pass two (`analyze_triage`, runs on save): stage (Worth Acting On / Reference / Inbox), action type (Build a tool / Make content / Test a strategy / Buy or try a tool / Just reference), impact 1-5, effort 1-5.
 4. **Recommend.** The note's Recommendations section lists 2-4 concrete numbered actions tied to his businesses. The note is shown in Telegram with a 💾 Save button. Saving stores the full enriched note, the triage, and the full transcript in the vault. Retrieval is `/vault` (recent 20) and `/search <word>` (substring match across summary, key ideas, why it matters, recommendations, tags).
 
-The loop is cost-first: text only, no video download on the primary path, no multimodal model. The old build sent every video to multimodal Gemini and that is what drove billing up. That path is gone.
+The loop is cost-first: text only, free transcription (YouTube captions + local faster-whisper), no multimodal model. The old build sent every video to multimodal Gemini and paid per-minute ElevenLabs transcription; both drove billing up. Those paths are gone.
 
 ## 4. Feature spec
 
 ### IN-SCOPE MVP (built and working today)
 
 **Ingestion**
-- TikTok links via Telegram message. Domain filter: tiktok.com, vm.tiktok, vt.tiktok.
-- ElevenLabs server-side transcription as the primary path. No download, no auth wall on TikTok's side. The older no-auth ElevenLabs URL endpoint is retired (returns 401).
-- Download failover when transcription fails: ScrapeCreators (proxy/session-backed, can return a native transcript), ScrapTik via RapidAPI, yt-dlp last resort. Local faster-whisper transcribes the downloaded file.
+- Any URL via Telegram message. Video domains route to the video pipeline (YouTube, TikTok); everything else is text (page/article/OG extraction).
+- YouTube transcription is free: native captions pulled via yt-dlp, no download, no API key.
+- TikTok and other video download via ScrapeCreators (proxy/session-backed, can return a native transcript) → ScrapTik via RapidAPI → yt-dlp last resort, then transcribe locally with faster-whisper.
 - Direct file upload (video, document, video note) accepted from Telegram, transcribed locally. This is the documented escape hatch for links that will not read.
 
 **Analysis**
@@ -54,6 +54,7 @@ The loop is cost-first: text only, no video download on the primary path, no mul
 
 **Freemium gate**
 - Free tier: 10 videos per month (config default, `.env` overridable). Metered in SQLite by calendar month (UTC).
+- Free tier also caps video length at `FREE_MAX_VIDEO_SECONDS` (180s); a duration gate (`_check_duration`) rejects longer videos before ingestion. Pro is unlimited on both.
 - Quota decrements after a successful analysis, whether or not the user saves to the vault.
 - On quota exhaustion the bot blocks the capture and sends a paywall message with an ⭐ Upgrade button.
 - Pro users are unlimited (quota check returns None). Plan lives on the users table.
@@ -74,7 +75,7 @@ The loop is cost-first: text only, no video download on the primary path, no mul
 
 **Deployment**
 - launchd agent (`com.hermes.snag.plist`), long-polling bot, stdlib only, logs in `logs/`.
-- Proven end to end 2026-08-21: the exact URL that previously failed with "all ingestion adapters failed" returns a transcript, content type, and action block via ElevenLabs + DeepSeek.
+- Proven end to end 2026-08-25: YouTube (captions) and TikTok (download + local whisper) both return a transcript, note, and action block via the free transcription stack + DeepSeek.
 
 ### PARKED (designed or dreamed, not built, no code)
 
@@ -85,7 +86,6 @@ The loop is cost-first: text only, no video download on the primary path, no mul
 - **Multi-source capture.** Split as of 2026-08-24. Content types (YouTube, articles, posts, images, PDFs) are core scope, not parked; see §6. Capture surfaces (iOS share sheet, Chrome extension, web form) remain parked behind validation. None of it exists yet. The June 5 launch order (web first, extension second, iOS third) was inverted: a Telegram bot shipped first because it is the lowest-friction capture surface.
 - **Tiered pricing.** Pro+ at $14.99, lifetime at $99, PDF support with a 25-page cap, 30-minute video caps. None exists. One Pro price only.
 - **Manual tags and notes post-save.** The spec allowed the user to add tags and notes after saving. The bot has no such command. The vault row has a status field and the dashboard can edit status, but the bot does not.
-- **Duration cap enforcement.** `FREE_MAX_VIDEO_SECONDS` is configured (180s) but no code enforces it.
 
 ## 5. Monetization model
 
@@ -95,7 +95,7 @@ Telegram Stars was the alternative and lost on economics: ~55-70% net after Appl
 
 - Free: 10 captures per month, paywalled at the 11th.
 - Pro: unlimited captures, single price set in Stripe (not in the repo).
-- No usage-based or cost-based tiering yet. The free cap protects margins by limiting ElevenLabs + DeepSeek spend per user, but the cost per capture is not tracked anywhere (see open questions).
+- No usage-based or cost-based tiering yet. Transcription is free, so the free cap protects margins by limiting DeepSeek spend per user, but the cost per capture is not tracked anywhere (see open questions).
 
 ## 6. Multi-channel roadmap
 
@@ -115,12 +115,12 @@ Validation is not defined quantitatively yet. That is an open question.
 
 1. **Pro price.** Not in the repo. The June 5 spec said $7.99. Confirm the Stripe price before any public push.
 2. **Stripe webhook has no live route.** `handle_webhook` is a function waiting to be wired to an HTTP endpoint. The dashboard server does not expose it. Until that route exists with `PUBLIC_BASE_URL` set, checkout links open but no webhook flips plans in production. This is the biggest gap between "billing code exists" and "billing works."
-3. **`FREE_MAX_VIDEO_SECONDS` is dead config.** 180s cap is set but never enforced. Either wire a duration gate into the ingestion path to protect margins or delete the setting.
+3. **Duration cap enforcement (resolved 2026-08-25).** `FREE_MAX_VIDEO_SECONDS` was dead config; a duration gate (`_check_duration`) now rejects free users over 180s before ingestion. Pro is unlimited.
 4. **Quota counts analyses, not saves.** A free user can burn 10 captures by analyzing and never saving. Intentional or not, decide and document it.
 5. **Search is LIKE, not full-text.** Substring scan across five fields per query. Fine at small vault sizes, will not scale. Decide the trigger point for moving to SQLite FTS5.
 6. **Status field has no bot surface.** Vault rows carry a status and the dashboard edits it, but `/vault` does not show status and no bot command changes it. Decide whether status is a feature or dead weight.
 7. **Mode override.** The June 5 "one-tap override" for content-type detection does not exist and nothing auto-detects content type. Add a real `/mode` lens system or formally drop the promise.
-8. **Unit economics are untracked.** Metering counts user quota, not cost. ElevenLabs scribe_v2 per-minute cost plus DeepSeek per-capture cost is the real margin driver. Add cost accounting before user count grows.
+8. **Unit economics are untracked.** Metering counts user quota, not cost. Transcription is free, so DeepSeek per-capture cost is the main margin driver. Add cost accounting before user count grows.
 9. **Bot identity.** The bot shares the `@tttest75bot` token with the retired OpenClaw build. Fine for testing, decide whether a fresh bot and branding launch with the public push.
 10. **Validation criteria for new channels.** What counts as demand signal for X, Instagram, or the web clipper? Pick a concrete metric (capture volume, vault saves, upgrade rate, a direct ask) or the roadmap stalls on vibes.
 11. **On-screen text moat trigger.** "Parked until demand signal" is a decision, the trigger is not. Define what demand would reopen it.
@@ -129,6 +129,6 @@ Validation is not defined quantitatively yet. That is an open question.
 
 ### Provenance
 
-- Files changed: `PRD.md` created (this file). Read-only on all code.
+- Files changed: `PRD.md` (this file). Read-only on all code.
 - Commands run: none beyond reads.
-- Sources: HANDOFF_2026-06-05-1200-snag-prd-prep.md, README.md, bot.py, ingest.py, analyze.py, modes.py, db.py, billing.py, config.py, elevenlabs_transcribe.py, set_bot_commands.py, dashboard/server.py, dashboard/build.py, .env.example.
+- Sources: HANDOFF_2026-06-05-1200-snag-prd-prep.md, README.md, bot.py, ingest.py, analyze.py, modes.py, db.py, billing.py, config.py, set_bot_commands.py, dashboard/server.py, dashboard/build.py, .env.example.

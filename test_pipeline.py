@@ -1,12 +1,12 @@
 """
-CLI proof harness — run the full pipeline on a TikTok URL without Telegram.
+CLI proof harness — run the full pipeline on a URL without Telegram.
 
-    python3 test_pipeline.py "https://www.tiktok.com/t/XXXX"    # transcript -> note -> triage
-    python3 test_pipeline.py --file /path/to/video.mp4           # local whisper fallback
+    python3 test_pipeline.py "https://www.tiktok.com/t/XXXX"    # download -> transcribe -> note -> triage
+    python3 test_pipeline.py --file /path/to/video.mp4           # local file transcription
 
 Proves transcript -> note -> triage end to end, mirroring bot.py's real flow.
-Requires DEEPSEEK_API_KEY for the note/triage steps; transcription alone works
-with no keys (ElevenLabs server-side, no auth).
+Transcription is free: YouTube native captions or local faster-whisper.
+Requires DEEPSEEK_API_KEY for the note/triage steps.
 """
 import sys
 import config
@@ -36,11 +36,13 @@ def main(argv):
     else:
         url = argv[1]
         print(f"[transcribe] {url}")
-        ok, transcript, err = ingest.transcript_from_url(url)
-        if ok:
-            print(f"[transcribe] ok via ElevenLabs, {len(transcript)} chars")
-        else:
-            print(f"[transcribe] ElevenLabs failed ({err}); falling back to download")
+        if ingest.is_youtube(url):
+            ok, transcript, err = ingest.youtube_transcript(url)
+            if ok:
+                print(f"[transcribe] ok via YouTube captions, {len(transcript)} chars")
+            else:
+                print(f"[transcribe] captions failed ({err}); falling back to download")
+        if transcript is None:
             result = ingest.ingest(url)
             if not result.ok:
                 print("INGEST FAILED:\n" + result.error)

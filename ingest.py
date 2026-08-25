@@ -122,7 +122,10 @@ def _via_ytdlp(url, dest):
     # response from webpage request"). --impersonate chrome (curl_cffi) mimics
     # Chrome's TLS so the request passes; a second attempt adds Chrome cookies
     # for login-only / age-gated videos. Verified 2026-08-22 against three URLs.
-    base = [YTDLP, "--no-update", "-f", "b[ext=mp4]/mp4/best", "-o", dest]
+    # bestvideo+bestaudio (merged) always carries an audio track; the old
+    # "b[ext=mp4]/mp4/best" selector fell through to a video-only mp4 (format
+    # 399: av01, acodec=none), which crashed faster-whisper with IndexError.
+    base = [YTDLP, "--no-update", "-f", "bestvideo*+bestaudio/best", "-o", dest]
     attempts = [
         base + ["--impersonate", "chrome", url],
         base + ["--impersonate", "chrome", "--cookies-from-browser", "chrome", url],
@@ -214,27 +217,6 @@ def probe_file_duration(path):
         return None
 
 
-def transcript_from_url(url):
-    """Primary path: ElevenLabs server-side transcription. No download, so
-    TikTok's anti-scraping block never applies. Returns (ok, transcript, error).
-
-    This is what makes Snag work when the download adapters fail. It mirrors the
-    path in the OpenClaw tiktok_brain.py pipeline that Chris confirmed works.
-    """
-    import elevenlabs_transcribe
-
-    try:
-        text = elevenlabs_transcribe.transcribe_url(url)
-    except elevenlabs_transcribe.ElevenLabsTranscribeError as e:
-        return False, "", str(e)
-    except Exception as e:
-        return False, "", repr(e)
-
-    if text and text.strip():
-        return True, text.strip(), ""
-    return False, "", "empty transcript"
-
-
 # --- Any-URL text ingestion (capture anything, Chris 2026-08-24) ------------
 
 # Domains that route through the video pipeline (transcribe). Everything else
@@ -281,6 +263,141 @@ def is_video_url(text):
     except ValueError:
         return False
     return any(host == d or host.endswith("." + d) for d in VIDEO_DOMAINS)
+
+
+def is_social_video(url):
+    """True when a URL is a login-walled social VIDEO: Instagram reels/tv and
+    Facebook watch/videos. These are video content, but they cannot be fetched
+    anonymously (login wall), so the bot gives an honest message instead of
+    producing a garbage note or a raw HTTP error.
+
+    Same hostname-suffix matching as is_video_url (exact host or dot-suffix),
+    so instagram.com.evil.com / notfacebook.com never match. False for text
+    posts (/p/, /groups/, /marketplace/), the homepages, and non-social hosts.
+    """
+    if not is_url(url):
+        return False
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host = parsed.netloc.lower().rstrip(".")
+        path = parsed.path.lower()
+    except ValueError:
+        return False
+    if host == "instagram.com" or host.endswith(".instagram.com"):
+        return "/reel/" in path or "/reels/" in path or "/tv/" in path
+    if (host == "facebook.com" or host.endswith(".facebook.com")
+            or host == "fb.com" or host.endswith(".fb.com")):
+        return "/share/v/" in path or "/watch/" in path or "/videos/" in path
+    return False
+
+
+YOUTUBE_DOMAINS = ("youtube.com", "youtu.be", "m.youtube.com", "music.youtube.com")
+
+
+def is_youtube(url):
+    """True for YouTube watch/short URLs (hostname-suffix match like is_video_url)."""
+    if not is_url(url):
+        return False
+    try:
+        host = urllib.parse.urlparse(url).netloc.lower().rstrip(".")
+    except ValueError:
+        return False
+    return any(host == d or host.endswith("." + d) for d in YOUTUBE_DOMAINS)
+
+
+def youtube_transcript(url):
+    """Extract YouTube's native captions via yt-dlp. Free, fast, no API key.
+
+    Returns (ok, text, error). This is the primary YouTube path: ElevenLabs
+    source_url rejects watch-page URLs (it wants a direct media link), and the
+    local faster-whisper fallback is slow on CPU and unreliable. Captions
+    handle any video length and cost nothing.
+    """
+    import glob
+    import tempfile
+
+    tmp = tempfile.mkdtemp(prefix="snag-subs-")
+    out_tmpl = str(Path(tmp) / "sub")
+    try:
+        subprocess.run(
+            [YTDLP, "--no-update", "--skip-download", "--write-auto-subs",
+             "--write-subs", "--sub-langs", "en.*", "--sub-format", "vtt",
+             "--output", out_tmpl, url],
+            capture_output=True, text=True, timeout=180,
+        )
+        vtt_files = sorted(glob.glob(str(Path(tmp) / "sub*.vtt")))
+        if not vtt_files:
+            return False, "", "no captions available on this video"
+        chosen = next((f for f in vtt_files if f.endswith(".en.vtt")), vtt_files[0])
+        with open(chosen, encoding="utf-8", errors="replace") as f:
+            text = _clean_vtt(f.read())
+        if not text.strip():
+            return False, "", "empty captions"
+        return True, text.strip(), ""
+    except subprocess.TimeoutExpired:
+        return False, "", "caption download timed out"
+    except Exception as e:
+        return False, "", repr(e)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _clean_vtt(text):
+    """Strip VTT timing/metadata and return clean caption text.
+
+    YouTube auto-captions are VTT with word-level timing: rolling-window cues
+    carry inline <00:00:00.000> timestamps and <c> tags, plus duplicate
+    "snapshot" cues. Keep only the clean snapshot lines, drop exact repeats.
+    """
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith(("WEBVTT", "Kind:", "Language:", "NOTE")):
+            continue
+        if "-->" in line:
+            continue
+        if "<" in line:  # word-timed line (carries <c> / <00:00:00.000> tags)
+            continue
+        if out and out[-1] == line:
+            continue
+        out.append(line)
+    return " ".join(out)
+
+
+# Social platforms that block anonymous fetching (login walls). When fetch_text
+# fails on one of these, the user gets a clear "paste the text instead" message
+# rather than a raw HTTP error.
+SOCIAL_LOGINWALL_DOMAINS = ("facebook.com", "fb.com", "instagram.com", "x.com", "twitter.com", "linkedin.com")
+
+_SOCIAL_LOGINWALL_NAMES = {
+    "facebook.com": "Facebook",
+    "fb.com": "Facebook",
+    "instagram.com": "Instagram",
+    "x.com": "X",
+    "twitter.com": "X",
+    "linkedin.com": "LinkedIn",
+}
+
+
+def is_social_blocked(url):
+    """Platform display name when the host is a login-walled social site.
+
+    Same hostname matching as is_video_url (exact host or dot-suffix), so
+    facebook.com.evil.com / notfacebook.com never match. Returns None for
+    everything else.
+    """
+    if not is_url(url):
+        return None
+    try:
+        host = urllib.parse.urlparse(url).netloc.lower().rstrip(".")
+    except ValueError:
+        return None
+    for domain in SOCIAL_LOGINWALL_DOMAINS:
+        if host == domain or host.endswith("." + domain):
+            return _SOCIAL_LOGINWALL_NAMES[domain]
+    return None
 
 
 class _TextExtractor(HTMLParser):

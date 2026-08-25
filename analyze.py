@@ -104,8 +104,34 @@ def analyze_triage(note):
 
 def transcribe_local(file_path):
     """Transcribe a local video/audio file with faster-whisper. Returns text."""
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+
     from faster_whisper import WhisperModel
 
-    model = WhisperModel("base", device="cpu", compute_type="int8")
-    segments, _info = model.transcribe(file_path, beam_size=5)
-    return " ".join([s.text for s in segments]).strip()
+    # Normalize to 16kHz mono WAV first. faster-whisper's PyAV decoder raises
+    # IndexError on files with no audio stream (e.g. a video-only mp4) or on
+    # codecs PyAV can't enumerate. Extracting audio up front makes that class
+    # of failure impossible and works for any input ffmpeg can read.
+    ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+    wav = tempfile.mktemp(prefix="snag-audio-", suffix=".wav")
+    try:
+        proc = subprocess.run(
+            [ffmpeg, "-y", "-v", "error", "-i", file_path,
+             "-vn", "-ac", "1", "-ar", "16000", wav],
+            capture_output=True, text=True, timeout=300,
+        )
+        if proc.returncode != 0 or not os.path.isfile(wav) or os.path.getsize(wav) == 0:
+            lines = (proc.stderr or "").strip().splitlines()
+            detail = lines[0] if lines else "no audio stream"
+            raise RuntimeError(f"no usable audio track: {detail}")
+        model = WhisperModel("base", device="cpu", compute_type="int8")
+        segments, _info = model.transcribe(wav, beam_size=5)
+        return " ".join([s.text for s in segments]).strip()
+    finally:
+        try:
+            os.remove(wav)
+        except OSError:
+            pass

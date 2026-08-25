@@ -26,8 +26,11 @@ def stub_pipeline(monkeypatch):
               "impact": 4, "effort": 2}
     monkeypatch.setattr(bot.analyze, "analyze_note", lambda t: dict(note))
     monkeypatch.setattr(bot.analyze, "analyze_triage", lambda n: dict(triage))
-    monkeypatch.setattr(bot.ingest, "transcript_from_url",
-                        lambda url: (True, "transcript of the video", ""))
+    monkeypatch.setattr(bot.ingest, "ingest",
+                        lambda url: bot.ingest.IngestResult(
+                            ok=True, file_path="/tmp/fake.mp4", duration=30, source="yt-dlp"))
+    monkeypatch.setattr(bot.analyze, "transcribe_local",
+                        lambda path: "transcript of the video")
     monkeypatch.setattr(bot.ingest, "probe_duration", lambda url: None)
     return note, triage
 
@@ -171,7 +174,7 @@ def test_worker_failure_marks_job_failed(fresh_db, fake_api, stub_pipeline,
                                          no_billing, pump, monkeypatch):
     def boom(url):
         raise RuntimeError("transcription exploded")
-    monkeypatch.setattr(bot.ingest, "transcript_from_url", boom)
+    monkeypatch.setattr(bot.ingest, "ingest", boom)
     bot.handle_message(msg(TIKTOK))
     pump()
     with db._conn() as c:
