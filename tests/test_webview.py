@@ -181,3 +181,62 @@ def test_db_init_is_idempotent_and_does_not_clobber_vault(tmp_path, monkeypatch)
     db.init()  # second init on an existing vault must not drop anything
     assert [r["id"] for r in db.all_vault()] == [vid]
     assert api.list_items()[0]["summary"] == "precious"
+
+
+# --- write-back (PATCH) ------------------------------------------------------
+
+def test_patch_requires_localhost_origin(monkeypatch, tmp_path):
+    import http.client
+    import json
+
+    srv = _start_viewer(tmp_path, monkeypatch)
+    try:
+        port = srv.server_address[1]
+        # no Origin header -> 403 (CSRF defense)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("PATCH", "/api/items/1", body=json.dumps({"status": "done"}),
+                     headers={"Host": f"localhost:{port}",
+                              "Content-Type": "application/json"})
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        assert resp.status == 403
+        # remote origin -> 403 too
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("PATCH", "/api/items/1", body=json.dumps({"status": "done"}),
+                     headers={"Host": f"localhost:{port}",
+                              "Content-Type": "application/json",
+                              "Origin": "https://evil.example.com"})
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        assert resp.status == 403
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_patch_updates_status_with_localhost_origin(monkeypatch, tmp_path):
+    import http.client
+    import json
+
+    srv = _start_viewer(tmp_path, monkeypatch)
+    try:
+        port = srv.server_address[1]
+        vid = make_item(1, "do me", stage="Worth Acting On")
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        body = json.dumps({"status": "done", "impact": 5})
+        conn.request("PATCH", f"/api/items/{vid}", body=body,
+                     headers={"Host": f"localhost:{port}",
+                              "Content-Type": "application/json",
+                              "Origin": "http://localhost:8080"})
+        resp = conn.getresponse()
+        payload = json.loads(resp.read())
+        conn.close()
+        assert resp.status == 200 and payload.get("ok") is True
+        row = db.get_vault_item(1, vid)
+        assert row["status"] == "done"
+        assert row["impact"] == 5
+    finally:
+        srv.shutdown()
+        srv.server_close()

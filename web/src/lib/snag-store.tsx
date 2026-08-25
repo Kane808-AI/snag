@@ -102,7 +102,7 @@ type SnagContextValue = {
   actionQueue: SnagItem[];
   captureCount: number;
   saveItem: (item: SnagItem) => void;
-  markDone: (id: string) => void;
+  markDone: (id: string, done?: boolean) => Promise<void>;
   getItem: (id: string) => SnagItem | undefined;
 };
 
@@ -130,8 +130,18 @@ export function SnagProvider({ children }: { children: ReactNode }) {
     setItems((prev) => [item, ...prev]);
   }, []);
 
-  const markDone = useCallback((id: string) => {
-    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, done: true } : i)));
+  const markDone = useCallback(async (id: string, done = true) => {
+    // Optimistic update, then persist. On failure, roll the flag back.
+    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, done } : i)));
+    try {
+      await fetch(`${API_BASE}/api/items/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: done ? "done" : "inbox" }),
+      });
+    } catch {
+      setItems((prev) => prev.map((i) => (i.id === id ? { ...i, done: !done } : i)));
+    }
   }, []);
 
   const value = useMemo<SnagContextValue>(() => {

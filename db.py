@@ -408,6 +408,40 @@ def snooze(telegram_id, item_id, until_ts):
         )
 
 
+def update_item_fields(item_id, fields):
+    """Web write-back: update whitelisted triage fields by vault id.
+
+    The localhost web viewer is single-user and writes by id (no telegram_id).
+    Only status, stage, impact, and effort are writable; the summary, transcript,
+    and tags are AI-owned and edited through the bot instead. Returns True when a
+    row was updated, False when the id didn't exist.
+    """
+    setters = {}
+    if "status" in fields:
+        s = (fields.get("status") or "").lower().strip()
+        if s not in STATUS_CYCLE:
+            raise ValueError(f"invalid status: {fields.get('status')}")
+        setters["status"] = s
+    if "stage" in fields:
+        setters["stage"] = normalize_stage(fields.get("stage"))
+    for key, lo, hi in (("impact", 1, 5), ("effort", 1, 5)):
+        if key in fields:
+            try:
+                v = int(fields.get(key))
+            except (TypeError, ValueError):
+                raise ValueError(f"invalid {key}: {fields.get(key)}")
+            if not (lo <= v <= hi):
+                raise ValueError(f"{key} out of range {lo}-{hi}")
+            setters[key] = v
+    if not setters:
+        return False
+    assignments = ", ".join(f"{k}=?" for k in setters)
+    params = list(setters.values()) + [item_id]
+    with _conn() as c:
+        cur = c.execute(f"UPDATE vault SET {assignments} WHERE id=?", params)
+        return cur.rowcount > 0
+
+
 def update_note(telegram_id, item_id, note):
     """Overwrite the AI note fields (regenerate path). Transcript and triage stay."""
     with _conn() as c:

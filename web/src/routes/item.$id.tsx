@@ -83,9 +83,7 @@ function ItemDetail() {
         effort={item.effort}
       >
         {item.done ? (
-          <span className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-            Marked done
-          </span>
+          <GhostButton onClick={() => markDone(item.id, false)}>Undo</GhostButton>
         ) : (
           <PrimaryButton onClick={() => markDone(item.id)}>Mark done</PrimaryButton>
         )}

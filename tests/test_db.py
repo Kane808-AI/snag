@@ -256,3 +256,38 @@ def test_quota_and_pro(fresh_db):
     db.set_plan(uid, "pro")
     assert db.quota_left(uid) is None
     assert db.is_pro(uid)
+
+
+# --- web write-back ----------------------------------------------------------
+
+def test_update_item_fields_writes_triage(fresh_db):
+    uid = 1
+    vid = make_item(uid, "triage item", impact=3, effort=3, stage="Inbox")
+    assert db.update_item_fields(vid, {"status": "done", "impact": 5,
+                                       "effort": 1, "stage": "Reference"})
+    row = db.get_vault_item(uid, vid)
+    assert row["status"] == "done"
+    assert row["impact"] == 5
+    assert row["effort"] == 1
+    assert row["stage"] == "Reference"
+    # AI-owned fields are untouched
+    assert row["summary"] == "triage item"
+
+
+def test_update_item_fields_validates(fresh_db):
+    vid = make_item(1, "validate me")
+    with pytest.raises(ValueError):
+        db.update_item_fields(vid, {"status": "bogus"})
+    with pytest.raises(ValueError):
+        db.update_item_fields(vid, {"impact": 99})
+    with pytest.raises(ValueError):
+        db.update_item_fields(vid, {"effort": "not-a-number"})
+    # unknown id -> False
+    assert not db.update_item_fields(99999, {"status": "done"})
+
+
+def test_update_item_fields_ignores_ai_fields(fresh_db):
+    vid = make_item(1, "summary is ai-owned")
+    # summary/transcript/tags are not writable through this path
+    assert not db.update_item_fields(vid, {"summary": "hacked"})
+    assert db.get_vault_item(1, vid)["summary"] == "summary is ai-owned"
