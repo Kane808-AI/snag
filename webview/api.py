@@ -15,7 +15,7 @@ import db  # noqa: E402
 
 # Columns the viewer renders. Everything else is stripped so the JSON stays lean.
 _PUBLIC = ("id", "summary", "key_ideas", "why_it_worked", "why_it_matters",
-           "reusable_pattern", "recommendations",
+           "reusable_pattern", "recommendations", "engagement",
            "tags", "stage", "action_type", "impact", "effort", "status",
            "source_url", "content_type", "transcript", "ts")
 

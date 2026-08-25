@@ -7,6 +7,9 @@ Two outputs, two prompts:
   sections make the note content-aware (Snag's edge over generic note tools).
 - TRIAGE_PROMPT -> strict JSON: stage, action_type, impact, effort. Scored
   against Chris's actual businesses, matching the OpenClaw triage rubric.
+
+Both accept a PERFORMANCE line (real view/like/save counts from the scraper) so
+the analysis is grounded in actual reach rather than a guess.
 """
 
 NOTE_PROMPT = """You are the analysis engine for Snag, a capture app that turns
@@ -31,8 +34,10 @@ One sentence (max 25 words) describing the core idea.
 2-3 bullets on the CONTENT CRAFT: what made this piece land. Name the hook (the
 opening line that grabbed attention), the structure or pacing, and the psychological
 trigger (curiosity gap, contrarian take, proof, story, etc.). For a video, note the
-format (talking head, voiceover, faceless text on screen). If this is not content
-with a clear hook, say what it is and why someone would read it.
+format (talking head, voiceover, faceless text on screen). If a PERFORMANCE line is
+present with the content, ground your judgment in those real numbers: high views plus
+high saves means the hook actually landed. If this is not content with a clear hook,
+say what it is and why someone would read it.
 
 **WHY IT MATTERS**
 2-3 sentences on why this idea matters for one or more of Chris's businesses, or for
@@ -74,6 +79,11 @@ low-effort stealable content pattern (faceless format, simple hook) is a cheap "
 content" move with LOW effort, so it should score effort 1-2 and action_type "Make content"
 when it maps to his TikTok. A tool or strategy that needs real build work scores higher effort.
 
+Use ENGAGEMENT to ground the impact score. Real, high view/like/save counts mean the idea is
+PROVEN with an audience, so a directly relevant one is higher impact than an untested idea.
+No engagement data (or low numbers) does not by itself cap impact, but proven reach is
+evidence for a higher score. Never inflate impact past 5.
+
 BE SELECTIVE. Chris saves many things because they seem interesting, but that is not the bar.
 Only a specific, near-term move with real payoff for one of HIS businesses is Worth Acting On.
 General inspiration, generic money-making content, and things he would merely nod at are
@@ -84,4 +94,5 @@ TITLE: {title}
 SUMMARY: {summary}
 WHY IT WORKED: {why_worked}
 REUSABLE PATTERN: {pattern}
+ENGAGEMENT: {engagement}
 CONTENT (excerpt): {transcript}"""

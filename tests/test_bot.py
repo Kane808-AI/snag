@@ -25,7 +25,7 @@ def stub_analysis(monkeypatch):
             "tags": ["ai-tools", "marketing"], "raw": "raw"}
     triage = {"stage": "Worth Acting On", "action_type": "Make content",
               "impact": 4, "effort": 2}
-    monkeypatch.setattr(bot.analyze, "analyze_note", lambda t: dict(note))
+    monkeypatch.setattr(bot.analyze, "analyze_note", lambda t, engagement=None: dict(note))
     monkeypatch.setattr(bot.analyze, "analyze_triage", lambda n: dict(triage))
     monkeypatch.setattr(bot.ingest, "ingest",
                         lambda url: bot.ingest.IngestResult(
@@ -283,7 +283,7 @@ def test_regen_callback_reruns_analysis(fresh_db, fake_api, no_billing, monkeypa
     new_note = {"summary": "fresh summary", "key_ideas": "fresh ideas",
                 "why_it_matters": "fresh why", "recommendations": "fresh recs",
                 "tags": ["new-tag"], "raw": "r"}
-    monkeypatch.setattr(bot.analyze, "analyze_note", lambda t: dict(new_note))
+    monkeypatch.setattr(bot.analyze, "analyze_note", lambda t, engagement=None: dict(new_note))
     bot.handle_callback(cb(f"regen:{vid}", 90))
     assert db.get_vault_item(1, vid)["summary"] == "fresh summary"
     assert db.get_vault_item(1, vid)["tags"] == "new-tag"

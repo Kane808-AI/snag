@@ -24,7 +24,7 @@ def stub_pipeline(monkeypatch):
             "tags": ["ai-tools", "marketing"], "raw": "raw"}
     triage = {"stage": "Worth Acting On", "action_type": "Make content",
               "impact": 4, "effort": 2}
-    monkeypatch.setattr(bot.analyze, "analyze_note", lambda t: dict(note))
+    monkeypatch.setattr(bot.analyze, "analyze_note", lambda t, engagement=None: dict(note))
     monkeypatch.setattr(bot.analyze, "analyze_triage", lambda n: dict(triage))
     monkeypatch.setattr(bot.ingest, "ingest",
                         lambda url: bot.ingest.IngestResult(

@@ -17,6 +17,30 @@ import modes
 _DEEPSEEK_URL = f"{config.DEEPSEEK_BASE_URL}/chat/completions"
 
 
+def _fmt_count(n):
+    if not n:
+        return "0"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    return str(n)
+
+
+def engagement_line(engagement):
+    """Human-readable engagement summary, or empty string when there is none."""
+    if not engagement:
+        return ""
+    parts = []
+    for key, label in (("view_count", "views"), ("like_count", "likes"),
+                       ("comment_count", "comments"), ("save_count", "saves"),
+                       ("repost_count", "reposts")):
+        v = engagement.get(key)
+        if v:
+            parts.append(f"{_fmt_count(v)} {label}")
+    return ", ".join(parts) if parts else ""
+
+
 def _call_deepseek(messages, json_mode=False):
     body = {
         "model": config.DEEPSEEK_MODEL,
@@ -48,9 +72,18 @@ def _section(text, name):
     return m.group(1).strip()
 
 
-def analyze_note(transcript):
-    """Transcript -> structured note via DeepSeek. Returns dict of fields + raw."""
-    full = modes.NOTE_PROMPT + "\n\nCONTENT:\n" + transcript
+def analyze_note(transcript, engagement=None):
+    """Transcript -> structured note via DeepSeek. Returns dict of fields + raw.
+
+    `engagement` (dict of view/like/save counts) is passed through into the note
+    so it can be stored, and is surfaced to the model as a PERFORMANCE line so
+    the "why it worked" judgment is grounded in real reach.
+    """
+    eng_line = engagement_line(engagement)
+    if eng_line:
+        full = modes.NOTE_PROMPT + "\n\nPERFORMANCE: " + eng_line + "\n\nCONTENT:\n" + transcript
+    else:
+        full = modes.NOTE_PROMPT + "\n\nCONTENT:\n" + transcript
     raw = _call_deepseek([{"role": "user", "content": full}])
 
     tags_raw = _section(raw, "TAGS")
@@ -71,6 +104,7 @@ def analyze_note(transcript):
         "reusable_pattern": pattern,
         "recommendations": recs,
         "tags": tags,
+        "engagement": engagement or {},
         "raw": raw,
     }
 
@@ -88,6 +122,7 @@ def analyze_triage(note):
         summary=note["summary"],
         why_worked=(note.get("why_it_worked") or "")[:600],
         pattern=(note.get("reusable_pattern") or "")[:400],
+        engagement=(engagement_line(note.get("engagement")) or "none"),
         transcript=(note.get("transcript") or "")[:4000],
     )
     raw = _call_deepseek([{"role": "user", "content": prompt}], json_mode=True)

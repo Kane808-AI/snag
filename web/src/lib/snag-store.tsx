@@ -10,6 +10,13 @@ import {
 
 export type Stage = "Worth Acting On" | "Reference" | "Inbox";
 export type SourceType = "TikTok" | "YouTube" | "Web" | "X" | "Newsletter" | "Podcast";
+export type Engagement = {
+  view_count?: number;
+  like_count?: number;
+  comment_count?: number;
+  save_count?: number;
+  repost_count?: number;
+};
 
 export type SnagItem = {
   id: string;
@@ -20,6 +27,7 @@ export type SnagItem = {
   stage: Stage;
   impact: number;
   effort: number;
+  engagement: Engagement;
   summary: string;
   keyIdeas: string[];
   whyItWorked: string;
@@ -47,6 +55,41 @@ export function sourceTypeFromUrl(url: string): SourceType {
   if (u.includes("substack") || u.includes("newsletter") || u.includes("buttondown")) return "Newsletter";
   if (u.includes("spotify") || u.includes("podcast") || u.includes("anchor.fm")) return "Podcast";
   return "Web";
+}
+
+function parseEngagement(raw: unknown): Engagement {
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      return (JSON.parse(raw) as Engagement) || {};
+    } catch {
+      return {};
+    }
+  }
+  if (raw && typeof raw === "object") return raw as Engagement;
+  return {};
+}
+
+function fmtCount(n?: number): string {
+  if (!n) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+export function engagementLine(eng: Engagement): string {
+  const parts: string[] = [];
+  const map: [keyof Engagement, string][] = [
+    ["view_count", "views"],
+    ["like_count", "likes"],
+    ["comment_count", "comments"],
+    ["save_count", "saves"],
+    ["repost_count", "reposts"],
+  ];
+  for (const [k, label] of map) {
+    const v = eng[k];
+    if (v) parts.push(`${fmtCount(v)} ${label}`);
+  }
+  return parts.join(", ");
 }
 
 function stripBullet(s: string): string {
@@ -82,6 +125,7 @@ function mapItem(r: Record<string, unknown>): SnagItem {
     stage: (r.stage as Stage) || "Inbox",
     impact: Number(r.impact ?? 3),
     effort: Number(r.effort ?? 3),
+    engagement: parseEngagement(r.engagement),
     summary,
     keyIdeas,
     whyItWorked: String(r.why_it_worked ?? ""),

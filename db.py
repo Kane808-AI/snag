@@ -5,6 +5,7 @@ organized idea, not just a summary. Search runs on SQLite FTS5 (external-content
 table kept in sync by triggers) with stage/tag/impact/type filters layered on
 top as SQL predicates.
 """
+import json
 import sqlite3
 import time
 from pathlib import Path
@@ -73,6 +74,7 @@ def init():
                 why_it_worked   TEXT,
                 why_it_matters  TEXT,
                 reusable_pattern TEXT,
+                engagement      TEXT,
                 recommendations TEXT,
                 tags            TEXT,
                 transcript      TEXT,
@@ -155,6 +157,8 @@ def init():
             c.execute("ALTER TABLE vault ADD COLUMN why_it_worked TEXT")
         if "reusable_pattern" not in cols:
             c.execute("ALTER TABLE vault ADD COLUMN reusable_pattern TEXT")
+        if "engagement" not in cols:
+            c.execute("ALTER TABLE vault ADD COLUMN engagement TEXT")
         # Status normalization: the pre-increment default was 'New'.
         c.execute("UPDATE vault SET status='inbox' WHERE status='New'")
         c.execute("UPDATE vault SET status=lower(status) WHERE status IN "
@@ -231,9 +235,9 @@ def save_note(telegram_id, source_url, note, transcript, triage, content_type="v
         cur = c.execute(
             "INSERT INTO vault (telegram_id, source_url, summary, key_ideas, "
             "why_it_worked, why_it_matters, reusable_pattern, recommendations, "
-            "tags, transcript, content_type, "
+            "tags, transcript, content_type, engagement, "
             "stage, action_type, impact, effort, status, ts) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 telegram_id,
                 source_url,
@@ -246,6 +250,7 @@ def save_note(telegram_id, source_url, note, transcript, triage, content_type="v
                 ",".join(note.get("tags", [])),
                 transcript,
                 content_type,
+                json.dumps(note.get("engagement") or {}),
                 triage.get("stage", "Inbox"),
                 triage.get("action_type", "Just reference"),
                 triage.get("impact", 3),

@@ -271,9 +271,18 @@ def _card_body(item, status):
         f"**Reusable Pattern**\n{pattern}\n\n"
         if pattern and pattern.strip().lower() != "none" else ""
     )
+    eng = item.get("engagement") or {}
+    if isinstance(eng, str):
+        try:
+            eng = json.loads(eng) or {}
+        except (ValueError, TypeError):
+            eng = {}
+    eng_line = analyze.engagement_line(eng)
+    eng_block = f"📊 {eng_line}\n\n" if eng_line else ""
     return (
         f"**{item.get('summary', '')}**\n\n"
         f"{_badges_line(item, status)}\n\n"
+        f"{eng_block}"
         f"**Key Ideas**\n{item.get('key_ideas', '')}\n\n"
         f"{worked_block}"
         f"**Why It Matters**\n{item.get('why_it_matters', '')}\n\n"
@@ -297,6 +306,7 @@ def _pending_card(note, triage, footer=""):
         "action_type": triage.get("action_type", "Just reference"),
         "impact": triage.get("impact", 3),
         "effort": triage.get("effort", 3),
+        "engagement": note.get("engagement", {}),
     }
     return _card_body(item, "inbox") + footer
 
@@ -370,9 +380,9 @@ def _share_text(item):
 
 # --- processing --------------------------------------------------------------
 
-def _process_transcript(chat_id, user_id, transcript, source_url, msg_id, content_type="video"):
+def _process_transcript(chat_id, user_id, transcript, source_url, msg_id, content_type="video", engagement=None):
     try:
-        note = analyze.analyze_note(transcript)
+        note = analyze.analyze_note(transcript, engagement=engagement)
     except Exception as e:
         _edit(chat_id, msg_id, "⚠️ I read it but couldn't analyze it just now. Try again in a moment.", [])
         print("analyze_note error:", repr(e), flush=True)
@@ -396,7 +406,7 @@ def _process_transcript(chat_id, user_id, transcript, source_url, msg_id, conten
     _edit(chat_id, msg_id, _pending_card(note, triage) + footer, _pending_buttons())
 
 
-def _process_file(chat_id, user_id, file_path, source_url, msg_id):
+def _process_file(chat_id, user_id, file_path, source_url, msg_id, engagement=None):
     if _is_free(user_id):
         dur = ingest.probe_file_duration(file_path)
         if not _check_duration(chat_id, user_id, dur, msg_id):
@@ -405,12 +415,11 @@ def _process_file(chat_id, user_id, file_path, source_url, msg_id):
         transcript = analyze.transcribe_local(file_path)
         if not transcript.strip():
             raise ValueError("empty transcript")
-        note = analyze.analyze_note(transcript)
     except Exception as e:
         _edit(chat_id, msg_id, "⚠️ I couldn't read that file just now. Try again in a moment.", [])
         print("process_file error:", repr(e), flush=True)
         return
-    _process_transcript(chat_id, user_id, transcript, source_url, msg_id)
+    _process_transcript(chat_id, user_id, transcript, source_url, msg_id, engagement=engagement)
 
 
 def _process_text_url(chat_id, user_id, url, msg_id):
@@ -487,9 +496,11 @@ def process_job(job):
         if result.native_transcript.strip():
             # ScrapeCreators sometimes returns the transcript with the download.
             # Use it directly and skip the local whisper pass entirely.
-            _process_transcript(chat_id, user_id, result.native_transcript, url, msg_id)
+            _process_transcript(chat_id, user_id, result.native_transcript, url, msg_id,
+                                engagement=result.engagement)
             return
-        _process_file(chat_id, user_id, result.file_path, url, msg_id)
+        _process_file(chat_id, user_id, result.file_path, url, msg_id,
+                      engagement=result.engagement)
     except Exception:
         _edit(chat_id, msg_id,
               "⚠️ Something went wrong on my end with that one. Please send it again.", [])

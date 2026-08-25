@@ -34,6 +34,7 @@ class IngestResult:
     duration: int = 0
     source: str = ""             # which adapter succeeded
     error: str = ""
+    engagement: dict = field(default_factory=dict)  # view_count, like_count, ... when available
     meta: dict = field(default_factory=dict)
 
 
@@ -59,6 +60,41 @@ def _workdir():
     return config.WORK_DIR
 
 
+def _engagement_from(info):
+    """Pull engagement counts from a metadata dict, defensively.
+
+    Handles yt-dlp's flat fields (view_count, like_count, comment_count,
+    save_count, repost_count) and TikTok's nested aweme_detail.statistics
+    (play_count, digg_count, collect_count, share_count). Returns a dict with
+    only the keys found, values coerced to int.
+    """
+    def pick(d, *names):
+        if not isinstance(d, dict):
+            return None
+        for n in names:
+            v = d.get(n)
+            if isinstance(v, (int, float)):
+                return int(v)
+            if isinstance(v, str) and v.strip().isdigit():
+                return int(v.strip())
+        return None
+
+    stats = ((info.get("aweme_detail") or {}).get("statistics")
+             or info.get("statistics") or {})
+    out = {}
+    for dst, names in (
+        ("view_count", ("view_count", "play_count")),
+        ("like_count", ("like_count", "digg_count")),
+        ("comment_count", ("comment_count",)),
+        ("save_count", ("save_count", "collect_count")),
+        ("repost_count", ("repost_count", "share_count")),
+    ):
+        v = pick(info, *names) or pick(stats, *names)
+        if v is not None:
+            out[dst] = v
+    return out
+
+
 # --- Adapter 1: ScrapeCreators ----------------------------------------------
 def _via_scrapecreators(url, dest):
     if not config.SCRAPECREATORS_API_KEY:
@@ -79,7 +115,8 @@ def _via_scrapecreators(url, dest):
     dur = int(data.get("duration", 0) or data.get("video", {}).get("duration", 0) or 0)
     return IngestResult(
         ok=True, file_path=dest, native_transcript=transcript,
-        duration=dur, source="scrapecreators", meta={"raw_keys": list(data.keys())},
+        duration=dur, source="scrapecreators", engagement=_engagement_from(data),
+        meta={"raw_keys": list(data.keys())},
     )
 
 
@@ -104,7 +141,8 @@ def _via_scraptik(url, dest):
         return None
     _download_to(dl, dest)
     dur = int(aweme.get("video", {}).get("duration", 0) or 0) // 1000
-    return IngestResult(ok=True, file_path=dest, duration=dur, source="scraptik")
+    return IngestResult(ok=True, file_path=dest, duration=dur, source="scraptik",
+                        engagement=_engagement_from(aweme))
 
 
 # --- Adapter 3: yt-dlp ------------------------------------------------------
@@ -154,7 +192,21 @@ def _via_ytdlp(url, dest):
         dur = int(float(probe.stdout.strip() or 0))
     except Exception:
         pass
-    return IngestResult(ok=True, file_path=dest, duration=dur, source="yt-dlp")
+    engagement = {}
+    try:
+        # Metadata-only pass for real engagement counts (view/like/comment/save).
+        # Best-effort: a failure here never fails the download.
+        meta = subprocess.run(
+            [YTDLP, "--no-update", "--skip-download", "--impersonate", "chrome",
+             "-J", url],
+            capture_output=True, text=True, timeout=60,
+        )
+        if meta.returncode == 0:
+            engagement = _engagement_from(json.loads(meta.stdout))
+    except Exception:
+        pass
+    return IngestResult(ok=True, file_path=dest, duration=dur, source="yt-dlp",
+                        engagement=engagement)
 
 
 def ingest(url):

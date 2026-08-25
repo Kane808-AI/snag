@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useSnag } from "@/lib/snag-store";
+import { useSnag, engagementLine } from "@/lib/snag-store";
 import { MetricBadge, SourceLine, StageBadge } from "@/components/snag/badges";
 import { ActionBlock } from "@/components/snag/action-block";
 import { NoteBody } from "@/components/snag/note-body";
@@ -70,6 +70,11 @@ function ItemDetail() {
             Saved {item.savedAt}
           </span>
         </div>
+        {engagementLine(item.engagement) && (
+          <div className="text-[11px] tabular-nums text-muted-foreground">
+            📊 {engagementLine(item.engagement)}
+          </div>
+        )}
       </div>
 
       <Thumb item={item} caption className="max-w-lg" />

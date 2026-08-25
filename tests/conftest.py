@@ -91,6 +91,7 @@ def make_item(uid, summary, stage="Reference", at="Just reference",
         "why_it_matters": "why it matters",
         "reusable_pattern": "reusable pattern",
         "recommendations": "rec one",
+        "engagement": {"view_count": 1200, "like_count": 80},
         "tags": tags.split(","),
     }
     triage = {"stage": stage, "action_type": at, "impact": impact, "effort": effort}

@@ -301,6 +301,7 @@ def test_save_note_persists_content_fields(fresh_db):
         "why_it_matters": "matters",
         "reusable_pattern": "[x] wrong -> [fix]",
         "recommendations": "rec",
+        "engagement": {"view_count": 5000, "save_count": 400},
         "tags": ["a"],
     }
     triage = {"stage": "Reference", "action_type": "Just reference", "impact": 3, "effort": 3}
@@ -308,3 +309,5 @@ def test_save_note_persists_content_fields(fresh_db):
     row = db.get_vault_item(1, vid)
     assert row["why_it_worked"] == "curiosity gap hook"
     assert row["reusable_pattern"] == "[x] wrong -> [fix]"
+    import json
+    assert json.loads(row["engagement"]) == {"view_count": 5000, "save_count": 400}
