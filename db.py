@@ -70,7 +70,9 @@ def init():
                 source_url      TEXT,
                 summary         TEXT,
                 key_ideas       TEXT,
+                why_it_worked   TEXT,
                 why_it_matters  TEXT,
+                reusable_pattern TEXT,
                 recommendations TEXT,
                 tags            TEXT,
                 transcript      TEXT,
@@ -146,6 +148,13 @@ def init():
         cols = _vault_cols(c)
         if "snooze_until" not in cols:
             c.execute("ALTER TABLE vault ADD COLUMN snooze_until INTEGER")
+        # Schema evolution: content-aware note fields (why it worked + reusable
+        # pattern), the "understand the content" half of the note.
+        cols = _vault_cols(c)
+        if "why_it_worked" not in cols:
+            c.execute("ALTER TABLE vault ADD COLUMN why_it_worked TEXT")
+        if "reusable_pattern" not in cols:
+            c.execute("ALTER TABLE vault ADD COLUMN reusable_pattern TEXT")
         # Status normalization: the pre-increment default was 'New'.
         c.execute("UPDATE vault SET status='inbox' WHERE status='New'")
         c.execute("UPDATE vault SET status=lower(status) WHERE status IN "
@@ -221,15 +230,18 @@ def save_note(telegram_id, source_url, note, transcript, triage, content_type="v
     with _conn() as c:
         cur = c.execute(
             "INSERT INTO vault (telegram_id, source_url, summary, key_ideas, "
-            "why_it_matters, recommendations, tags, transcript, content_type, "
+            "why_it_worked, why_it_matters, reusable_pattern, recommendations, "
+            "tags, transcript, content_type, "
             "stage, action_type, impact, effort, status, ts) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 telegram_id,
                 source_url,
                 note.get("summary", ""),
                 note.get("key_ideas", ""),
+                note.get("why_it_worked", ""),
                 note.get("why_it_matters", ""),
+                note.get("reusable_pattern", ""),
                 note.get("recommendations", ""),
                 ",".join(note.get("tags", [])),
                 transcript,
@@ -446,12 +458,15 @@ def update_note(telegram_id, item_id, note):
     """Overwrite the AI note fields (regenerate path). Transcript and triage stay."""
     with _conn() as c:
         c.execute(
-            "UPDATE vault SET summary=?, key_ideas=?, why_it_matters=?, "
-            "recommendations=?, tags=? WHERE telegram_id=? AND id=?",
+            "UPDATE vault SET summary=?, key_ideas=?, why_it_worked=?, "
+            "why_it_matters=?, reusable_pattern=?, recommendations=?, tags=? "
+            "WHERE telegram_id=? AND id=?",
             (
                 note.get("summary", ""),
                 note.get("key_ideas", ""),
+                note.get("why_it_worked", ""),
                 note.get("why_it_matters", ""),
+                note.get("reusable_pattern", ""),
                 note.get("recommendations", ""),
                 ",".join(note.get("tags", [])),
                 telegram_id,

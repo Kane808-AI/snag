@@ -20,7 +20,8 @@ TIKTOK = "https://www.tiktok.com/t/ZTD5K5MKb"
 def stub_analysis(monkeypatch):
     """Deterministic note + triage + transcription, no network."""
     note = {"summary": "AI tools for marketers", "key_ideas": "build in public",
-            "why_it_matters": "matters for Brand75", "recommendations": "ship one tool",
+            "why_it_worked": "hook grabs attention", "why_it_matters": "matters for Brand75",
+            "reusable_pattern": "[task] wrong -> [fix]", "recommendations": "ship one tool",
             "tags": ["ai-tools", "marketing"], "raw": "raw"}
     triage = {"stage": "Worth Acting On", "action_type": "Make content",
               "impact": 4, "effort": 2}

@@ -87,7 +87,9 @@ def make_item(uid, summary, stage="Reference", at="Just reference",
     note = {
         "summary": summary,
         "key_ideas": "key idea one",
+        "why_it_worked": "why it worked",
         "why_it_matters": "why it matters",
+        "reusable_pattern": "reusable pattern",
         "recommendations": "rec one",
         "tags": tags.split(","),
     }

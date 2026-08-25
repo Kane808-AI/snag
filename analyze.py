@@ -58,13 +58,17 @@ def analyze_note(transcript):
 
     summary = _section(raw, "SUMMARY")
     key_ideas = _section(raw, "KEY IDEAS")
+    why_worked = _section(raw, "WHY IT WORKED")
     why = _section(raw, "WHY IT MATTERS")
+    pattern = _section(raw, "REUSABLE PATTERN")
     recs = _section(raw, "RECOMMENDATIONS")
 
     return {
         "summary": summary,
         "key_ideas": key_ideas,
+        "why_it_worked": why_worked,
         "why_it_matters": why,
+        "reusable_pattern": pattern,
         "recommendations": recs,
         "tags": tags,
         "raw": raw,
@@ -82,6 +86,8 @@ def analyze_triage(note):
     prompt = modes.TRIAGE_PROMPT.format(
         title=note["summary"][:120],
         summary=note["summary"],
+        why_worked=(note.get("why_it_worked") or "")[:600],
+        pattern=(note.get("reusable_pattern") or "")[:400],
         transcript=(note.get("transcript") or "")[:4000],
     )
     raw = _call_deepseek([{"role": "user", "content": prompt}], json_mode=True)

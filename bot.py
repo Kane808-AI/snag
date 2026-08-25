@@ -264,11 +264,20 @@ def _badges_line(item, status):
 def _card_body(item, status):
     tags = _split_tags(item.get("tags"))
     tags_line = "**Tags**: " + ", ".join(f"#{t}" for t in tags) if tags else ""
+    why_worked = item.get("why_it_worked", "")
+    pattern = item.get("reusable_pattern", "")
+    worked_block = f"**Why It Worked**\n{why_worked}\n\n" if why_worked else ""
+    pattern_block = (
+        f"**Reusable Pattern**\n{pattern}\n\n"
+        if pattern and pattern.strip().lower() != "none" else ""
+    )
     return (
         f"**{item.get('summary', '')}**\n\n"
         f"{_badges_line(item, status)}\n\n"
         f"**Key Ideas**\n{item.get('key_ideas', '')}\n\n"
+        f"{worked_block}"
         f"**Why It Matters**\n{item.get('why_it_matters', '')}\n\n"
+        f"{pattern_block}"
         f"**Recommendations**\n{item.get('recommendations', '')}\n\n"
         f"{tags_line}"
     )
@@ -279,7 +288,9 @@ def _pending_card(note, triage, footer=""):
         "id": None,
         "summary": note.get("summary", ""),
         "key_ideas": note.get("key_ideas", ""),
+        "why_it_worked": note.get("why_it_worked", ""),
         "why_it_matters": note.get("why_it_matters", ""),
+        "reusable_pattern": note.get("reusable_pattern", ""),
         "recommendations": note.get("recommendations", ""),
         "tags": ",".join(note.get("tags", [])),
         "stage": triage.get("stage", "Inbox"),
@@ -335,10 +346,19 @@ def _actions_row_text(item):
 def _share_text(item):
     tags = _split_tags(item.get("tags"))
     tags_line = "**Tags**: " + ", ".join(f"#{t}" for t in tags) if tags else ""
+    why_worked = item.get("why_it_worked", "")
+    pattern = item.get("reusable_pattern", "")
+    worked_block = f"**Why It Worked**\n{why_worked}\n\n" if why_worked else ""
+    pattern_block = (
+        f"**Reusable Pattern**\n{pattern}\n\n"
+        if pattern and pattern.strip().lower() != "none" else ""
+    )
     body = (
         f"**{item.get('summary', '')}**\n\n"
         f"**Key Ideas**\n{item.get('key_ideas', '')}\n\n"
+        f"{worked_block}"
         f"**Why It Matters**\n{item.get('why_it_matters', '')}\n\n"
+        f"{pattern_block}"
         f"**Recommendations**\n{item.get('recommendations', '')}\n\n"
         f"{tags_line}"
     )

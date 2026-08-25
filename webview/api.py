@@ -14,7 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import db  # noqa: E402
 
 # Columns the viewer renders. Everything else is stripped so the JSON stays lean.
-_PUBLIC = ("id", "summary", "key_ideas", "why_it_matters", "recommendations",
+_PUBLIC = ("id", "summary", "key_ideas", "why_it_worked", "why_it_matters",
+           "reusable_pattern", "recommendations",
            "tags", "stage", "action_type", "impact", "effort", "status",
            "source_url", "content_type", "transcript", "ts")
 
@@ -27,7 +28,8 @@ def _matches(item, q, stage, tag, impact, status):
     if q:
         hay = " ".join([
             item.get("summary") or "", item.get("key_ideas") or "",
-            item.get("why_it_matters") or "", item.get("recommendations") or "",
+            item.get("why_it_worked") or "", item.get("why_it_matters") or "",
+            item.get("reusable_pattern") or "", item.get("recommendations") or "",
             item.get("tags") or "", item.get("transcript") or "",
         ]).lower()
         if q.lower() not in hay:

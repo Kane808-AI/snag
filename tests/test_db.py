@@ -291,3 +291,20 @@ def test_update_item_fields_ignores_ai_fields(fresh_db):
     # summary/transcript/tags are not writable through this path
     assert not db.update_item_fields(vid, {"summary": "hacked"})
     assert db.get_vault_item(1, vid)["summary"] == "summary is ai-owned"
+
+
+def test_save_note_persists_content_fields(fresh_db):
+    note = {
+        "summary": "content aware",
+        "key_ideas": "k1",
+        "why_it_worked": "curiosity gap hook",
+        "why_it_matters": "matters",
+        "reusable_pattern": "[x] wrong -> [fix]",
+        "recommendations": "rec",
+        "tags": ["a"],
+    }
+    triage = {"stage": "Reference", "action_type": "Just reference", "impact": 3, "effort": 3}
+    vid = db.save_note(1, "https://tiktok.com/x", note, "transcript", triage)
+    row = db.get_vault_item(1, vid)
+    assert row["why_it_worked"] == "curiosity gap hook"
+    assert row["reusable_pattern"] == "[x] wrong -> [fix]"

@@ -22,7 +22,9 @@ export type SnagItem = {
   effort: number;
   summary: string;
   keyIdeas: string[];
+  whyItWorked: string;
   whyItMatters: string;
+  reusablePattern: string;
   action: string;
   actionType: string;
   tags: string[];
@@ -82,7 +84,9 @@ function mapItem(r: Record<string, unknown>): SnagItem {
     effort: Number(r.effort ?? 3),
     summary,
     keyIdeas,
+    whyItWorked: String(r.why_it_worked ?? ""),
     whyItMatters: String(r.why_it_matters ?? ""),
+    reusablePattern: String(r.reusable_pattern ?? ""),
     action: recs[0] ?? "",
     actionType: String(r.action_type ?? "Just reference"),
     tags: String(r.tags ?? "")
