@@ -403,6 +403,25 @@ def test_native_transcript_skips_local_whisper(fresh_db, fake_api, stub_analysis
     assert any(m == "editMessageText" for m, _p, _r in fake_api.calls)
 
 
+def test_empty_transcript_falls_back_to_caption(fresh_db, fake_api, stub_analysis,
+                                                no_billing, monkeypatch):
+    monkeypatch.setattr(bot, "_is_free", lambda uid: False)
+    monkeypatch.setattr(bot.analyze, "transcribe_local", lambda path: "")
+    bot._process_file(1, 1, "/tmp/fake.mp4", "uploaded-file", 1001, caption="Listing caption")
+    texts = [p.get("text", "") for _m, p, _r in edited(fake_api)]
+    assert edited(fake_api), "empty transcript should still produce a card from the caption"
+    assert not any("couldn't read" in t for t in texts)
+
+
+def test_empty_transcript_no_caption_still_errors(fresh_db, fake_api, stub_analysis,
+                                                  no_billing, monkeypatch):
+    monkeypatch.setattr(bot, "_is_free", lambda uid: False)
+    monkeypatch.setattr(bot.analyze, "transcribe_local", lambda path: "")
+    bot._process_file(1, 1, "/tmp/fake.mp4", "uploaded-file", 1001)
+    texts = [p.get("text", "") for _m, p, _r in edited(fake_api)]
+    assert any("couldn't read" in t for t in texts)
+
+
 # --- misc --------------------------------------------------------------------
 
 def test_empty_message_gets_help(fresh_db, fake_api, no_billing):

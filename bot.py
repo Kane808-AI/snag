@@ -415,11 +415,16 @@ def _process_file(chat_id, user_id, file_path, source_url, msg_id, engagement=No
             return
     try:
         transcript = analyze.transcribe_local(file_path)
-        if not transcript.strip():
-            raise ValueError("empty transcript")
     except Exception as e:
-        _edit(chat_id, msg_id, "⚠️ I couldn't read that file just now. Try again in a moment.", [])
         print("process_file error:", repr(e), flush=True)
+        transcript = ""
+    if not transcript.strip():
+        if caption.strip():
+            # No speech to transcribe (music-only / slideshow); analyze the caption.
+            _process_transcript(chat_id, user_id, caption, source_url, msg_id,
+                                content_type="article", engagement=engagement)
+            return
+        _edit(chat_id, msg_id, "⚠️ I couldn't read that file just now. Try again in a moment.", [])
         return
     _process_transcript(chat_id, user_id, transcript, source_url, msg_id, engagement=engagement, caption=caption)
 
@@ -436,8 +441,10 @@ def _process_social(chat_id, user_id, url, msg_id):
     if social_capture.platform_of(url) == "facebook":
         result = ingest.ingest(url)  # yt-dlp handles public FB videos anonymously
         if result.ok:
+            meta = result.meta or {}
+            caption = "\n\n".join(x for x in (meta.get("description"), meta.get("title")) if x).strip()
             _process_file(chat_id, user_id, result.file_path, url, msg_id,
-                          engagement=result.engagement)
+                          engagement=result.engagement, caption=caption)
             return
     cap = social_capture.capture(url)
     if not cap.ok:

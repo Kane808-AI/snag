@@ -193,20 +193,28 @@ def _via_ytdlp(url, dest):
     except Exception:
         pass
     engagement = {}
+    meta_info = {}
     try:
-        # Metadata-only pass for real engagement counts (view/like/comment/save).
-        # Best-effort: a failure here never fails the download.
+        # Metadata-only pass for real engagement counts (view/like/comment/save)
+        # plus the post title/description (the caption). Best-effort: a failure
+        # here never fails the download.
         meta = subprocess.run(
             [YTDLP, "--no-update", "--skip-download", "--impersonate", "chrome",
              "-J", url],
             capture_output=True, text=True, timeout=60,
         )
         if meta.returncode == 0:
-            engagement = _engagement_from(json.loads(meta.stdout))
+            j = json.loads(meta.stdout)
+            engagement = _engagement_from(j)
+            meta_info = {
+                "title": (j.get("title") or "").strip(),
+                "description": (j.get("description") or "").strip(),
+                "uploader": (j.get("uploader") or "").strip(),
+            }
     except Exception:
         pass
     return IngestResult(ok=True, file_path=dest, duration=dur, source="yt-dlp",
-                        engagement=engagement)
+                        engagement=engagement, meta=meta_info)
 
 
 def ingest(url):
@@ -318,14 +326,13 @@ def is_video_url(text):
 
 
 def is_social_video(url):
-    """True when a URL is a login-walled social VIDEO: Instagram reels/tv and
-    Facebook watch/videos. These are video content, but they cannot be fetched
-    anonymously (login wall), so the bot gives an honest message instead of
-    producing a garbage note or a raw HTTP error.
+    """True when a URL is login-walled Instagram/Facebook content (video OR post)
+    that needs browser/session capture. These cannot be fetched anonymously
+    (login wall), so they route to social_capture instead of fetch_text.
 
     Same hostname-suffix matching as is_video_url (exact host or dot-suffix),
-    so instagram.com.evil.com / notfacebook.com never match. False for text
-    posts (/p/, /groups/, /marketplace/), the homepages, and non-social hosts.
+    so instagram.com.evil.com / notfacebook.com never match. False for
+    non-content paths (homepages, settings) and non-social hosts.
     """
     if not is_url(url):
         return False
@@ -336,10 +343,10 @@ def is_social_video(url):
     except ValueError:
         return False
     if host == "instagram.com" or host.endswith(".instagram.com"):
-        return "/reel/" in path or "/reels/" in path or "/tv/" in path
+        return any(s in path for s in ("/reel/", "/reels/", "/tv/", "/p/"))
     if (host == "facebook.com" or host.endswith(".facebook.com")
             or host == "fb.com" or host.endswith(".fb.com")):
-        return "/share/v/" in path or "/watch/" in path or "/videos/" in path
+        return any(s in path for s in ("/share/", "/watch/", "/videos/", "/reel/", "/posts/", "/photo/"))
     if host == "fb.watch" or host.endswith(".fb.watch"):
         return True  # fb.watch is exclusively video short links
     return False

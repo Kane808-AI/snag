@@ -87,10 +87,16 @@ def test_is_social_video_facebook_watch_and_videos():
     assert ingest.is_social_video("https://www.facebook.com/watch/?v=123")
 
 
-def test_is_social_video_rejects_text_posts_homepages_and_non_social():
-    assert not ingest.is_social_video("https://www.instagram.com/p/ABC/")
+def test_is_social_video_posts_and_shares():
+    assert ingest.is_social_video("https://www.instagram.com/p/ABC/")
+    assert ingest.is_social_video("https://www.facebook.com/share/p/123/")
+    assert ingest.is_social_video("https://www.facebook.com/posts/123")
+    assert ingest.is_social_video("https://www.facebook.com/photo/?fbid=123")
+
+
+def test_is_social_video_rejects_homepages_and_non_social():
     assert not ingest.is_social_video("https://www.instagram.com/")
-    assert not ingest.is_social_video("https://www.facebook.com/groups/x/posts/1")
+    assert not ingest.is_social_video("https://www.facebook.com/")
     assert not ingest.is_social_video("https://example.com/reel/foo")
 
 
