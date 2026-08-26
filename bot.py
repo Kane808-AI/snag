@@ -380,7 +380,9 @@ def _share_text(item):
 
 # --- processing --------------------------------------------------------------
 
-def _process_transcript(chat_id, user_id, transcript, source_url, msg_id, content_type="video", engagement=None):
+def _process_transcript(chat_id, user_id, transcript, source_url, msg_id, content_type="video", engagement=None, caption=""):
+    if caption:
+        transcript = f"Caption: {caption.strip()}\n\n{transcript}".strip()
     try:
         note = analyze.analyze_note(transcript, engagement=engagement)
     except Exception as e:
@@ -406,7 +408,7 @@ def _process_transcript(chat_id, user_id, transcript, source_url, msg_id, conten
     _edit(chat_id, msg_id, _pending_card(note, triage) + footer, _pending_buttons())
 
 
-def _process_file(chat_id, user_id, file_path, source_url, msg_id, engagement=None):
+def _process_file(chat_id, user_id, file_path, source_url, msg_id, engagement=None, caption=""):
     if _is_free(user_id):
         dur = ingest.probe_file_duration(file_path)
         if not _check_duration(chat_id, user_id, dur, msg_id):
@@ -419,15 +421,47 @@ def _process_file(chat_id, user_id, file_path, source_url, msg_id, engagement=No
         _edit(chat_id, msg_id, "⚠️ I couldn't read that file just now. Try again in a moment.", [])
         print("process_file error:", repr(e), flush=True)
         return
-    _process_transcript(chat_id, user_id, transcript, source_url, msg_id, engagement=engagement)
+    _process_transcript(chat_id, user_id, transcript, source_url, msg_id, engagement=engagement, caption=caption)
+
+
+def _process_social(chat_id, user_id, url, msg_id):
+    """Instagram/Facebook path: browser capture -> transcribe (video) or analyze (caption).
+
+    Facebook public videos are handled by yt-dlp (verified to work anonymously
+    with --impersonate chrome). Instagram and login-gated Facebook go through a
+    persistent logged-in browser profile (social_capture): extract the video +
+    caption when possible, degrade to caption-only analysis when the video can't
+    be pulled, so a failed video capture is still a saved idea."""
+    import social_capture
+    if social_capture.platform_of(url) == "facebook":
+        result = ingest.ingest(url)  # yt-dlp handles public FB videos anonymously
+        if result.ok:
+            _process_file(chat_id, user_id, result.file_path, url, msg_id,
+                          engagement=result.engagement)
+            return
+    cap = social_capture.capture(url)
+    if not cap.ok:
+        _edit(chat_id, msg_id,
+              "❌ " + (cap.error or "I couldn't capture that.") +
+              "\n\nTip: paste the caption or text here and I'll turn it into a note.", [])
+        return
+    if cap.file_path:
+        _process_file(chat_id, user_id, cap.file_path, url, msg_id,
+                      engagement=cap.engagement, caption=cap.caption)
+        return
+    if cap.caption or cap.title:
+        text = "\n\n".join(x for x in (cap.title, cap.caption) if x).strip()
+        _process_transcript(chat_id, user_id, text, url, msg_id,
+                            content_type="article", engagement=cap.engagement)
+        return
+    _edit(chat_id, msg_id, "❌ I couldn't read that.", [])
 
 
 def _process_text_url(chat_id, user_id, url, msg_id):
     """Text path for any non-video URL: fetch, extract, analyze. No transcription,
     no duration gate. Feeds the same note + triage card as a video."""
     if ingest.is_social_video(url):
-        _edit(chat_id, msg_id,
-              "❌ Instagram reels and Facebook videos need login to read. Snag can't capture those yet. Try a TikTok or YouTube link instead.", [])
+        _process_social(chat_id, user_id, url, msg_id)
         return
     ok, text, err = ingest.fetch_text(url)
     if not ok:

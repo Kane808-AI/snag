@@ -40,4 +40,6 @@ FREE_MAX_VIDEO_SECONDS = int(os.environ.get("FREE_MAX_VIDEO_SECONDS", "180"))  #
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")  # local transcription model size
 DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "data" / "app.db"))
 WORK_DIR = os.environ.get("WORK_DIR", "/tmp/snag")
+# Persistent browser profile for Instagram/Facebook capture (log in once).
+SOCIAL_BROWSER_PROFILE = os.environ.get("SOCIAL_BROWSER_PROFILE", str(BASE_DIR / "data" / "browser-profile"))
 BRAND_NAME = os.environ.get("BRAND_NAME", "Snag")

@@ -340,6 +340,8 @@ def is_social_video(url):
     if (host == "facebook.com" or host.endswith(".facebook.com")
             or host == "fb.com" or host.endswith(".fb.com")):
         return "/share/v/" in path or "/watch/" in path or "/videos/" in path
+    if host == "fb.watch" or host.endswith(".fb.watch"):
+        return True  # fb.watch is exclusively video short links
     return False
 
 
