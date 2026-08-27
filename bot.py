@@ -44,6 +44,7 @@ import ingest
 import analyze
 import billing
 import worker
+import service
 
 API = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}"
 FILE_API = f"https://api.telegram.org/file/bot{config.TELEGRAM_BOT_TOKEN}"
@@ -229,17 +230,6 @@ def _duration_reject(dur):
             f"up to **{limit} seconds**. Send a shorter clip, or upgrade for unlimited.")
 
 
-def _check_duration(chat_id, user_id, duration, msg_id):
-    """F12 gate. Free users get a friendly rejection over the limit. Unknown
-    duration (None) passes, so a probe failure never blocks a user."""
-    if not _is_free(user_id):
-        return True
-    if duration and duration > config.FREE_MAX_VIDEO_SECONDS:
-        _edit(chat_id, msg_id, _duration_reject(duration), [])
-        return False
-    return True
-
-
 # --- rendering ---------------------------------------------------------------
 
 def _status_icon(status):
@@ -380,120 +370,72 @@ def _share_text(item):
 
 # --- processing --------------------------------------------------------------
 
-def _process_transcript(chat_id, user_id, transcript, source_url, msg_id, content_type="video", engagement=None, caption=""):
-    if caption:
-        transcript = f"Caption: {caption.strip()}\n\n{transcript}".strip()
-    try:
-        note = analyze.analyze_note(transcript, engagement=engagement)
-    except Exception as e:
-        _edit(chat_id, msg_id, "⚠️ I read it but couldn't analyze it just now. Try again in a moment.", [])
-        print("analyze_note error:", repr(e), flush=True)
-        return
-    try:
-        triage = analyze.analyze_triage({**note, "transcript": transcript})
-    except Exception as e:
-        print("triage error:", repr(e), flush=True)
-        triage = {"stage": "Inbox", "action_type": "Just reference", "impact": 3, "effort": 3}
-    if msg_id is None:
-        # no processing message to resolve (direct call): send a fresh card
-        last = send(chat_id, _pending_card(note, triage), _pending_buttons())
-        if last and last.get("result"):
+def _resolve(chat_id, user_id, msg_id, url, res):
+    """Map a service CaptureResult to the Telegram card (success) or a friendly
+    rejection (failure). No pipeline logic lives here: the shared service owns
+    ingest -> transcribe -> analyze, and this only turns the result into Telegram."""
+    if res.ok:
+        note, triage = res.note, res.triage
+        if msg_id is None:
+            # no processing message to resolve (direct call): send a fresh card
+            last = send(chat_id, _pending_card(note, triage), _pending_buttons())
+            if not (last and last.get("result")):
+                return
             msg_id = last["result"]["message_id"]
-    _PENDING[(chat_id, msg_id)] = {"url": source_url, "note": note,
-                                   "transcript": transcript, "triage": triage,
-                                   "content_type": content_type}
-    db.record_usage(user_id, source_url)
-    left = db.quota_left(user_id)
-    footer = "" if left is None else f"\n\n({left} free captures left this month)"
-    _edit(chat_id, msg_id, _pending_card(note, triage) + footer, _pending_buttons())
+        _PENDING[(chat_id, msg_id)] = {"url": res.url, "note": note,
+                                       "transcript": res.transcript, "triage": triage,
+                                       "content_type": res.content_type}
+        db.record_usage(user_id, res.url)
+        left = db.quota_left(user_id)
+        footer = "" if left is None else f"\n\n({left} free captures left this month)"
+        _edit(chat_id, msg_id, _pending_card(note, triage) + footer, _pending_buttons())
+        return
+
+    kind, error, duration = res.kind, res.error, res.duration
+    if kind == "duration":
+        _edit(chat_id, msg_id, _duration_reject(duration), [])
+    elif kind == "analyze":
+        _edit(chat_id, msg_id, "⚠️ I read it but couldn't analyze it just now. Try again in a moment.", [])
+    elif kind == "file_empty":
+        _edit(chat_id, msg_id, "⚠️ I couldn't read that file just now. Try again in a moment.", [])
+    elif kind == "social":
+        _edit(chat_id, msg_id,
+              "❌ " + (error or "I couldn't capture that.") +
+              "\n\nTip: paste the caption or text here and I'll turn it into a note.", [])
+    elif kind == "social_empty":
+        _edit(chat_id, msg_id, "❌ I couldn't read that.", [])
+    elif kind == "loginwall":
+        _edit(chat_id, msg_id,
+              f"❌ {error} blocks auto-reading. Paste the text here instead "
+              "and I'll turn it into a note.", [])
+    elif kind == "fetch":
+        _edit(chat_id, msg_id,
+              "❌ I couldn't read that page. " + (error or "")[:200] +
+              "\n\nTip: some sites block reading; try a different link or paste "
+              "the text itself.", [])
+    elif kind == "ingest":
+        _edit(chat_id, msg_id,
+              "❌ I couldn't read that one. " + error.split("\n")[0] +
+              "\n\nTip: open it in TikTok, tap Share → Save Video, and send me the "
+              "file directly, that always works.", [])
+    else:
+        _edit(chat_id, msg_id, "❌ I couldn't read that.", [])
 
 
 def _process_file(chat_id, user_id, file_path, source_url, msg_id, engagement=None, caption=""):
-    if _is_free(user_id):
-        dur = ingest.probe_file_duration(file_path)
-        if not _check_duration(chat_id, user_id, dur, msg_id):
-            return
-    try:
-        transcript = analyze.transcribe_local(file_path)
-    except Exception as e:
-        print("process_file error:", repr(e), flush=True)
-        transcript = ""
-    if not transcript.strip():
-        if caption.strip():
-            # No speech to transcribe (music-only / slideshow); analyze the caption.
-            _process_transcript(chat_id, user_id, caption, source_url, msg_id,
-                                content_type="article", engagement=engagement)
-            return
-        _edit(chat_id, msg_id, "⚠️ I couldn't read that file just now. Try again in a moment.", [])
-        return
-    _process_transcript(chat_id, user_id, transcript, source_url, msg_id, engagement=engagement, caption=caption)
-
-
-def _process_social(chat_id, user_id, url, msg_id):
-    """Instagram/Facebook path: browser capture -> transcribe (video) or analyze (caption).
-
-    Facebook public videos are handled by yt-dlp (verified to work anonymously
-    with --impersonate chrome). Instagram and login-gated Facebook go through a
-    persistent logged-in browser profile (social_capture): extract the video +
-    caption when possible, degrade to caption-only analysis when the video can't
-    be pulled, so a failed video capture is still a saved idea."""
-    import social_capture
-    if social_capture.platform_of(url) == "facebook":
-        result = ingest.ingest(url)  # yt-dlp handles public FB videos anonymously
-        if result.ok:
-            meta = result.meta or {}
-            caption = "\n\n".join(x for x in (meta.get("description"), meta.get("title")) if x).strip()
-            _process_file(chat_id, user_id, result.file_path, url, msg_id,
-                          engagement=result.engagement, caption=caption)
-            return
-    cap = social_capture.capture(url)
-    if not cap.ok:
-        _edit(chat_id, msg_id,
-              "❌ " + (cap.error or "I couldn't capture that.") +
-              "\n\nTip: paste the caption or text here and I'll turn it into a note.", [])
-        return
-    if cap.file_path:
-        _process_file(chat_id, user_id, cap.file_path, url, msg_id,
-                      engagement=cap.engagement, caption=cap.caption)
-        return
-    if cap.caption or cap.title:
-        text = "\n\n".join(x for x in (cap.title, cap.caption) if x).strip()
-        _process_transcript(chat_id, user_id, text, url, msg_id,
-                            content_type="article", engagement=cap.engagement)
-        return
-    _edit(chat_id, msg_id, "❌ I couldn't read that.", [])
-
-
-def _process_text_url(chat_id, user_id, url, msg_id):
-    """Text path for any non-video URL: fetch, extract, analyze. No transcription,
-    no duration gate. Feeds the same note + triage card as a video."""
-    if ingest.is_social_video(url):
-        _process_social(chat_id, user_id, url, msg_id)
-        return
-    ok, text, err = ingest.fetch_text(url)
-    if not ok:
-        platform = ingest.is_social_blocked(url)
-        if platform:
-            _edit(chat_id, msg_id,
-                  f"❌ {platform} blocks auto-reading. Paste the text here instead "
-                  "and I'll turn it into a note.", [])
-            return
-        _edit(chat_id, msg_id,
-              "❌ I couldn't read that page. " + (err or "")[:200] +
-              "\n\nTip: some sites block reading; try a different link or paste "
-              "the text itself.", [])
-        return
-    _process_transcript(chat_id, user_id, text, url, msg_id, content_type="article")
+    """Thin adapter over the shared service, kept for direct-call tests."""
+    res = service.capture_file(file_path, user_id, url=source_url,
+                               engagement=engagement, caption=caption)
+    _resolve(chat_id, user_id, msg_id, source_url, res)
 
 
 def process_job(job):
     """Run one queued job. Called by the background worker thread.
 
-    Mirrors the old synchronous flow: duration gate for free users, ElevenLabs
-    server-side transcription first, download + local whisper as the fallback,
-    then the note + triage card. The ack message resolves into the card.
-    Unhandled failures notify the user and re-raise so the worker marks the
-    job failed.
+    A thin adapter over the shared capture service: every kind of job is handed
+    to service.capture_* and the result is resolved into the ack card. The
+    pipeline itself (ingest -> transcribe -> analyze -> triage) lives in
+    service.py, shared with the web app.
     """
     chat_id = job["chat_id"]
     user_id = job["telegram_id"]
@@ -502,46 +444,19 @@ def process_job(job):
 
     try:
         if job["kind"] == "text":
-            _process_transcript(chat_id, user_id, job["source_url"] or "", "", msg_id, content_type="text")
+            res = service.capture_text(job["source_url"] or "", user_id,
+                                       content_type="text")
+            _resolve(chat_id, user_id, msg_id, "", res)
             return
 
         if job["kind"] == "file":
             path = _download_telegram_file(job["file_id"])
-            _process_file(chat_id, user_id, path, url, msg_id)
+            res = service.capture_file(path, user_id, url=url)
+            _resolve(chat_id, user_id, msg_id, url, res)
             return
 
-        if not ingest.is_video_url(url):
-            _process_text_url(chat_id, user_id, url, msg_id)
-            return
-
-        if _is_free(user_id):
-            dur = ingest.probe_duration(url)
-            if not _check_duration(chat_id, user_id, dur, msg_id):
-                return
-        if ingest.is_youtube(url):
-            ok, transcript, _terr = ingest.youtube_transcript(url)
-            if ok:
-                _process_transcript(chat_id, user_id, transcript, url, msg_id)
-                return
-            print(f"[ingest] youtube captions failed for {url}: {_terr[:300]}", flush=True)
-        result = ingest.ingest(url)
-        if not result.ok:
-            print(f"[ingest] all adapters failed for {url}: {result.error[-400:]}", flush=True)
-            _edit(chat_id, msg_id,
-                  "❌ I couldn't read that one. " + result.error.split("\n")[0] +
-                  "\n\nTip: open it in TikTok, tap Share → Save Video, and send me the "
-                  "file directly, that always works.", [])
-            return
-        if not _check_duration(chat_id, user_id, result.duration, msg_id):
-            return
-        if result.native_transcript.strip():
-            # ScrapeCreators sometimes returns the transcript with the download.
-            # Use it directly and skip the local whisper pass entirely.
-            _process_transcript(chat_id, user_id, result.native_transcript, url, msg_id,
-                                engagement=result.engagement)
-            return
-        _process_file(chat_id, user_id, result.file_path, url, msg_id,
-                      engagement=result.engagement)
+        res = service.capture_url(url, user_id)
+        _resolve(chat_id, user_id, msg_id, url, res)
     except Exception:
         _edit(chat_id, msg_id,
               "⚠️ Something went wrong on my end with that one. Please send it again.", [])

@@ -144,6 +144,51 @@ function mapItem(r: Record<string, unknown>): SnagItem {
   };
 }
 
+export type CapturePreview = {
+  note: Record<string, unknown>;
+  triage: {
+    stage: Stage;
+    action_type: string;
+    impact: number;
+    effort: number;
+  };
+  transcript: string;
+  content_type: string;
+  url: string;
+};
+
+export type CaptureResponse = {
+  ok: boolean;
+  preview?: CapturePreview;
+  kind?: string;
+  error?: string;
+  duration?: number;
+};
+
+// The capture endpoint returns a preview shaped like a raw vault row plus a
+// triage block. Fold it through the same mapper so the preview renders with the
+// exact same NoteBody / badges as a saved item.
+export function previewToItem(p: CapturePreview): SnagItem {
+  const note = p.note ?? {};
+  const rawTags = note["tags"];
+  const tags = Array.isArray(rawTags)
+    ? (rawTags as string[]).join(",")
+    : String(rawTags ?? "");
+  return mapItem({
+    ...note,
+    tags,
+    source_url: p.url,
+    content_type: p.content_type,
+    stage: p.triage.stage,
+    action_type: p.triage.action_type,
+    impact: p.triage.impact,
+    effort: p.triage.effort,
+    id: "preview",
+    ts: Math.floor(Date.now() / 1000),
+    status: "inbox",
+  });
+}
+
 type SnagContextValue = {
   items: SnagItem[];
   captures: SnagItem[];
@@ -152,6 +197,8 @@ type SnagContextValue = {
   saveItem: (item: SnagItem) => void;
   markDone: (id: string, done?: boolean) => Promise<void>;
   getItem: (id: string) => SnagItem | undefined;
+  captureUrl: (url: string) => Promise<CaptureResponse>;
+  saveCapture: (preview: CapturePreview) => Promise<string | null>;
 };
 
 const SnagContext = createContext<SnagContextValue | null>(null);
@@ -159,20 +206,18 @@ const SnagContext = createContext<SnagContextValue | null>(null);
 export function SnagProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<SnagItem[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${API_BASE}/api/items`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (!cancelled) setItems((d.items ?? []).map(mapItem));
-      })
-      .catch(() => {
-        /* API unavailable: leave the list empty rather than crash */
-      });
-    return () => {
-      cancelled = true;
-    };
+  const refresh = useCallback(async () => {
+    try {
+      const d = await (await fetch(`${API_BASE}/api/items`)).json();
+      setItems((d.items ?? []).map(mapItem));
+    } catch {
+      /* API unavailable: leave the list as-is rather than crash */
+    }
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const saveItem = useCallback((item: SnagItem) => {
     setItems((prev) => [item, ...prev]);
@@ -192,6 +237,35 @@ export function SnagProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const captureUrl = useCallback(async (url: string): Promise<CaptureResponse> => {
+    const r = await fetch(`${API_BASE}/api/capture`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    return r.json();
+  }, []);
+
+  const saveCapture = useCallback(async (preview: CapturePreview): Promise<string | null> => {
+    const r = await fetch(`${API_BASE}/api/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: preview.url,
+        note: preview.note,
+        triage: preview.triage,
+        transcript: preview.transcript,
+        content_type: preview.content_type,
+      }),
+    });
+    const d = (await r.json()) as { ok?: boolean; id?: string };
+    if (d.ok && d.id) {
+      await refresh();
+      return d.id;
+    }
+    return null;
+  }, [refresh]);
+
   const value = useMemo<SnagContextValue>(() => {
     const actionQueue = items
       .filter((i) => i.stage === "Worth Acting On" && !i.done)
@@ -204,8 +278,10 @@ export function SnagProvider({ children }: { children: ReactNode }) {
       saveItem,
       markDone,
       getItem: (id: string) => items.find((i) => i.id === id),
+      captureUrl,
+      saveCapture,
     };
-  }, [items, saveItem, markDone]);
+  }, [items, saveItem, markDone, captureUrl, saveCapture]);
 
   return <SnagContext.Provider value={value}>{children}</SnagContext.Provider>;
 }

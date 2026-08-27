@@ -19,6 +19,8 @@ Endpoints:
     GET  /api/stats        -> counts by stage/status
     GET  /api/tags         -> tag list with counts
     PATCH /api/items/<id>  -> write-back {status|stage|impact|effort}
+    POST /api/capture      -> analyze a {url} into a note preview (unsaved)
+    POST /api/items        -> save a previewed capture into the vault
 """
 import json
 import sys
@@ -32,9 +34,15 @@ sys.path.insert(0, str(_THIS.parent))              # for `import db`
 
 import api  # noqa: E402
 import db   # noqa: E402
+import service  # noqa: E402
 
 ROOT = _THIS
 PORT = 8476
+
+# The viewer is single-user (localhost dogfood). Captures and saves made from
+# the web app are attributed to this fixed user id; the Telegram bot uses the
+# real Telegram user id instead.
+WEB_USER_ID = 1
 
 # DNS-rebinding guard: only these Host names may reach the viewer. The browser
 # always sends "Host: localhost:8476" (or 127.0.0.1:8476) for this server, so
@@ -97,7 +105,7 @@ class Handler(BaseHTTPRequestHandler):
         if origin:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Methods", "GET, PATCH, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.send_header("Access-Control-Max-Age", "86400")
         self.send_header("Content-Length", "0")
@@ -137,6 +145,72 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/tags":
             return self._json(200, {"tags": api.all_tags()})
+
+        self._json(404, {"error": "not found"})
+
+    def do_POST(self):
+        # Capture (analyze a URL into a note preview) and save (persist a
+        # previewed capture). Both are actions, so they require a valid Host
+        # and an explicit localhost Origin, matching the PATCH write-back.
+        if not _host_ok(self.headers.get("Host", "")):
+            return self._json(403, {"error": "bad host"})
+        if not self._origin():
+            return self._json(403, {"error": "forbidden origin"})
+
+        try:
+            length = min(int(self.headers.get("Content-Length") or 0), 1024 * 1024)
+            body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+        except (ValueError, json.JSONDecodeError):
+            return self._json(400, {"error": "bad json"})
+        if not isinstance(body, dict):
+            return self._json(400, {"error": "expected object"})
+
+        path = urlparse(self.path).path
+
+        if path == "/api/capture":
+            url = (body.get("url") or "").strip()
+            if not url:
+                return self._json(400, {"error": "url required"})
+            try:
+                res = service.capture_url(url, WEB_USER_ID)
+            except Exception as e:  # unexpected pipeline failure, not a user error
+                return self._json(500, {"ok": False, "kind": "error", "error": repr(e)})
+            if not res.ok:
+                return self._json(422, {
+                    "ok": False, "kind": res.kind, "error": res.error,
+                    "duration": res.duration,
+                })
+            # Strip the raw model output before it reaches the frontend; the
+            # preview only needs the structured fields.
+            note = {k: v for k, v in res.note.items() if k != "raw"}
+            return self._json(200, {
+                "ok": True,
+                "preview": {
+                    "note": note,
+                    "triage": res.triage,
+                    "transcript": res.transcript,
+                    "content_type": res.content_type,
+                    "url": res.url,
+                },
+            })
+
+        if path == "/api/items":
+            note = body.get("note")
+            triage = body.get("triage")
+            if not isinstance(note, dict) or not isinstance(triage, dict):
+                return self._json(400, {"error": "note and triage must be objects"})
+            try:
+                item_id = db.save_note(
+                    WEB_USER_ID,
+                    body.get("url") or "",
+                    note,
+                    body.get("transcript") or "",
+                    triage,
+                    body.get("content_type") or "video",
+                )
+            except Exception as e:
+                return self._json(500, {"error": repr(e)})
+            return self._json(200, {"ok": True, "id": item_id})
 
         self._json(404, {"error": "not found"})
 

@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useSnag } from "@/lib/snag-store";
 import { ItemRow } from "@/components/snag/item-row";
+import { CaptureBox } from "@/components/snag/capture-box";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -35,10 +36,13 @@ function InboxPage() {
 
       <div className="rounded-md border border-border bg-surface p-5 md:p-6">
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Snag captures from Telegram. Send a link to the bot and it lands here —
-          turned into a note with one recommended next action, saved to your vault.
+          Paste a link to turn it into a sourced note with one recommended next
+          action, then save it to your vault. The Telegram bot captures the same
+          way, so both surfaces stay in sync.
         </p>
       </div>
+
+      <CaptureBox />
 
       <section>
         <div className="flex items-baseline justify-between border-b border-border pb-2">
@@ -53,7 +57,8 @@ function InboxPage() {
           {captures.length === 0 ? (
             <div className="rounded-md border border-dashed border-border px-5 py-14 text-center">
               <p className="text-sm text-muted-foreground">
-                Nothing captured yet. Send a link to the bot and it will show up here.
+                Nothing captured yet. Paste a link above, or send one to the bot, and it
+                will show up here.
               </p>
             </div>
           ) : (

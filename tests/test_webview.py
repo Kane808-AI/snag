@@ -240,3 +240,100 @@ def test_patch_updates_status_with_localhost_origin(monkeypatch, tmp_path):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+# --- capture + save (POST) ----------------------------------------------------
+
+def _post(port, path, body, origin="http://localhost:8080"):
+    import http.client
+    import json
+
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("POST", path, body=json.dumps(body),
+                 headers={"Host": f"localhost:{port}",
+                          "Content-Type": "application/json",
+                          "Origin": origin})
+    resp = conn.getresponse()
+    payload = json.loads(resp.read())
+    conn.close()
+    return resp.status, payload
+
+
+def test_post_capture_requires_localhost_origin(monkeypatch, tmp_path):
+    import http.client
+    import json
+
+    srv = _start_viewer(tmp_path, monkeypatch)
+    try:
+        port = srv.server_address[1]
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("POST", "/api/capture", body=json.dumps({"url": "https://x.com/1"}),
+                     headers={"Host": f"localhost:{port}", "Content-Type": "application/json"})
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        assert resp.status == 403
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_post_capture_analyzes_url_and_strips_raw(monkeypatch, tmp_path):
+    import service as svc
+
+    srv = _start_viewer(tmp_path, monkeypatch)
+    try:
+        port = srv.server_address[1]
+        res = svc.CaptureResult(
+            ok=True,
+            note={"summary": "s", "key_ideas": "k", "tags": ["a"], "raw": "hidden",
+                  "engagement": {}},
+            triage={"stage": "Inbox", "action_type": "Just reference",
+                    "impact": 3, "effort": 3},
+            transcript="t", content_type="article", url="https://x.com/1",
+        )
+        monkeypatch.setattr(server.service, "capture_url", lambda url, uid: res)
+        status, payload = _post(port, "/api/capture", {"url": "https://x.com/1"})
+        assert status == 200 and payload["ok"] is True
+        assert payload["preview"]["note"]["summary"] == "s"
+        assert "raw" not in payload["preview"]["note"]
+        assert payload["preview"]["triage"]["stage"] == "Inbox"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_post_capture_failure_is_reported(monkeypatch, tmp_path):
+    import service as svc
+
+    srv = _start_viewer(tmp_path, monkeypatch)
+    try:
+        port = srv.server_address[1]
+        monkeypatch.setattr(server.service, "capture_url",
+                            lambda url, uid: svc.CaptureResult(ok=False, kind="loginwall",
+                                                               error="Instagram", url=url))
+        status, payload = _post(port, "/api/capture", {"url": "https://instagram.com/reel/x/"})
+        assert status == 422
+        assert payload["ok"] is False and payload["kind"] == "loginwall"
+        assert payload["error"] == "Instagram"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_post_items_saves_note(monkeypatch, tmp_path):
+    srv = _start_viewer(tmp_path, monkeypatch)
+    try:
+        port = srv.server_address[1]
+        note = {"summary": "hello", "key_ideas": "k", "tags": ["a"], "engagement": {}}
+        triage = {"stage": "Inbox", "action_type": "Just reference", "impact": 3, "effort": 3}
+        body = {"url": "https://x.com/1", "note": note, "triage": triage,
+                "transcript": "t", "content_type": "article"}
+        status, payload = _post(port, "/api/items", body)
+        assert status == 200 and payload["ok"] is True
+        item = db.get_vault_item(server.WEB_USER_ID, payload["id"])
+        assert item and item["summary"] == "hello"
+        assert item["content_type"] == "article"
+    finally:
+        srv.shutdown()
+        srv.server_close()
