@@ -10,6 +10,7 @@ import sqlite3
 import time
 from pathlib import Path
 from datetime import datetime, timezone
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import config
 
@@ -69,6 +70,7 @@ def init():
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 telegram_id     INTEGER NOT NULL,
                 source_url      TEXT,
+                thumbnail_url   TEXT,
                 summary         TEXT,
                 key_ideas       TEXT,
                 why_it_worked   TEXT,
@@ -159,6 +161,8 @@ def init():
             c.execute("ALTER TABLE vault ADD COLUMN reusable_pattern TEXT")
         if "engagement" not in cols:
             c.execute("ALTER TABLE vault ADD COLUMN engagement TEXT")
+        if "thumbnail_url" not in cols:
+            c.execute("ALTER TABLE vault ADD COLUMN thumbnail_url TEXT")
         # Status normalization: the pre-increment default was 'New'.
         c.execute("UPDATE vault SET status='inbox' WHERE status='New'")
         c.execute("UPDATE vault SET status=lower(status) WHERE status IN "
@@ -229,18 +233,64 @@ def quota_left(telegram_id):
     return max(0, config.FREE_MONTHLY_LIMIT - month_usage(telegram_id))
 
 
-def save_note(telegram_id, source_url, note, transcript, triage, content_type="video"):
+def canonical_source_url(source_url):
+    """Compare sources without fragments or common marketing-link noise."""
+    value = (source_url or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return value
+    query = [
+        (key, item) for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.lower().startswith("utm_") and key.lower() not in {"fbclid", "gclid"}
+    ]
+    return urlunsplit((
+        parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip("/") or "/",
+        urlencode(query, doseq=True), "",
+    ))
+
+
+def existing_note_for_source(telegram_id, source_url, include_all_users=False):
+    """Return the newest saved item for this logical source URL, if any.
+
+    The local mobile Library currently renders the shared dogfood vault, so its
+    duplicate check can opt into that same visible scope. Telegram keeps the
+    normal per-user scope.
+    """
+    canonical = canonical_source_url(source_url)
+    if not canonical:
+        return None
+    with _conn() as c:
+        if include_all_users:
+            rows = c.execute(
+                "SELECT id, source_url FROM vault WHERE status != 'archived' ORDER BY id DESC"
+            ).fetchall()
+        else:
+            rows = c.execute(
+                "SELECT id, source_url FROM vault WHERE telegram_id=? AND status != 'archived' ORDER BY id DESC",
+                (telegram_id,),
+            ).fetchall()
+    for row in rows:
+        if canonical_source_url(row["source_url"]) == canonical:
+            return row["id"]
+    return None
+
+
+def save_note(telegram_id, source_url, note, transcript, triage, content_type="video", thumbnail_url=""):
     """Store the full enriched note + triage. Returns the new row id."""
     with _conn() as c:
         cur = c.execute(
-            "INSERT INTO vault (telegram_id, source_url, summary, key_ideas, "
+            "INSERT INTO vault (telegram_id, source_url, thumbnail_url, summary, key_ideas, "
             "why_it_worked, why_it_matters, reusable_pattern, recommendations, "
             "tags, transcript, content_type, engagement, "
             "stage, action_type, impact, effort, status, ts) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 telegram_id,
                 source_url,
+                thumbnail_url,
                 note.get("summary", ""),
                 note.get("key_ideas", ""),
                 note.get("why_it_worked", ""),
@@ -391,6 +441,20 @@ def get_vault_item(telegram_id, item_id):
         return dict(row) if row else None
 
 
+def set_thumbnail_url(telegram_id, item_id, thumbnail_url):
+    """Persist a vetted source preview URL without touching note content."""
+    value = (thumbnail_url or "").strip()
+    if not value.startswith(("https://", "http://")):
+        raise ValueError("thumbnail_url must be an http(s) URL")
+    with _conn() as c:
+        cur = c.execute(
+            "UPDATE vault SET thumbnail_url=? WHERE telegram_id=? AND id=? "
+            "AND (thumbnail_url IS NULL OR thumbnail_url='')",
+            (value, telegram_id, item_id),
+        )
+        return cur.rowcount > 0
+
+
 def next_status(status):
     s = (status or "inbox").lower().strip()
     if s not in STATUS_CYCLE:
@@ -429,9 +493,10 @@ def update_item_fields(item_id, fields):
     """Web write-back: update whitelisted triage fields by vault id.
 
     The localhost web viewer is single-user and writes by id (no telegram_id).
-    Only status, stage, impact, and effort are writable; the summary, transcript,
-    and tags are AI-owned and edited through the bot instead. Returns True when a
-    row was updated, False when the id didn't exist.
+    Status, stage, impact, effort, snooze time, and explicit tag additions/removals are
+    writable. The summary and transcript remain AI-owned. Tag operations merge
+    with the existing AI tags rather than replacing them. Returns True when a row
+    was updated, False when the id didn't exist.
     """
     setters = {}
     if "status" in fields:
@@ -450,11 +515,40 @@ def update_item_fields(item_id, fields):
             if not (lo <= v <= hi):
                 raise ValueError(f"{key} out of range {lo}-{hi}")
             setters[key] = v
-    if not setters:
+    if "snooze_until" in fields:
+        value = fields.get("snooze_until")
+        if value is None:
+            setters["snooze_until"] = None
+        else:
+            try:
+                setters["snooze_until"] = int(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"invalid snooze_until: {value}")
+    tag_ops = {}
+    for key in ("add_tags", "remove_tags"):
+        if key not in fields:
+            continue
+        values = fields.get(key)
+        if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+            raise ValueError(f"{key} must be a list of strings")
+        tag_ops[key] = [value.strip().lower() for value in values if value.strip()]
+    if not setters and not tag_ops:
         return False
-    assignments = ", ".join(f"{k}=?" for k in setters)
-    params = list(setters.values()) + [item_id]
     with _conn() as c:
+        row = c.execute("SELECT tags FROM vault WHERE id=?", (item_id,)).fetchone()
+        if not row:
+            return False
+        if tag_ops:
+            tags = _split_tags(row["tags"])
+            existing = {tag.lower() for tag in tags}
+            for tag in tag_ops.get("add_tags", []):
+                if tag not in existing and len(tags) < 12:
+                    tags.append(tag)
+                    existing.add(tag)
+            remove = set(tag_ops.get("remove_tags", []))
+            setters["tags"] = ",".join(tag for tag in tags if tag.lower() not in remove)
+        assignments = ", ".join(f"{k}=?" for k in setters)
+        params = list(setters.values()) + [item_id]
         cur = c.execute(f"UPDATE vault SET {assignments} WHERE id=?", params)
         return cur.rowcount > 0
 

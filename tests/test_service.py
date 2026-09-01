@@ -39,6 +39,20 @@ def test_capture_text_empty_is_rejected(stub_pipeline):
     assert not res.ok and res.kind == "file_empty"
 
 
+def test_capture_text_saves_an_honest_reference_when_analysis_fails(stub_pipeline, monkeypatch):
+    monkeypatch.setattr(
+        service,
+        "_analyze",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("provider unavailable")),
+    )
+    res = service.capture_text("some text", 1)
+    assert res.ok
+    assert res.note["summary"] == "some text"
+    assert res.note["why_it_matters"] == "AI analysis is temporarily unavailable. The original content was saved for review."
+    assert res.note["tags"] == []
+    assert res.triage["stage"] == "Inbox"
+
+
 def test_capture_url_routes_video(fresh_db, stub_pipeline, monkeypatch):
     monkeypatch.setattr(service.ingest, "is_video_url", lambda url: True)
     monkeypatch.setattr(service.ingest, "probe_duration", lambda url: None)
@@ -58,6 +72,35 @@ def test_capture_url_routes_text(stub_pipeline, monkeypatch):
     monkeypatch.setattr(service.ingest, "fetch_text", lambda url: (True, "article body", ""))
     res = service.capture_url(ARTICLE, 1)
     assert res.ok and res.content_type == "article"
+
+
+def test_capture_article_keeps_preview_url(stub_pipeline, monkeypatch):
+    monkeypatch.setattr(service.ingest, "is_video_url", lambda url: False)
+    monkeypatch.setattr(service.ingest, "is_social_video", lambda url: False)
+    monkeypatch.setattr(service.ingest, "fetch_text",
+                        lambda url, include_preview=False: (True, "article body", "", "https://example.com/cover.jpg"))
+    res = service.capture_url(ARTICLE, 1)
+    assert res.ok and res.thumbnail_url == "https://example.com/cover.jpg"
+
+
+def test_youtube_native_transcript_keeps_thumbnail(fresh_db, stub_pipeline, monkeypatch):
+    url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    monkeypatch.setattr(service.ingest, "is_video_url", lambda url: True)
+    monkeypatch.setattr(service.ingest, "probe_duration", lambda url: None)
+    monkeypatch.setattr(service.ingest, "is_youtube", lambda url: True)
+    monkeypatch.setattr(service.ingest, "youtube_transcript", lambda url: (True, "words", ""))
+    res = service.capture_url(url, 1)
+    assert res.ok and res.thumbnail_url.endswith("/dQw4w9WgXcQ/hqdefault.jpg")
+
+
+def test_social_capture_keeps_preview_url(stub_pipeline, monkeypatch):
+    monkeypatch.setattr(service.ingest, "is_video_url", lambda url: False)
+    monkeypatch.setattr(service.ingest, "is_social_video", lambda url: True)
+    monkeypatch.setattr(service.social_capture, "capture", lambda url: service.social_capture.SocialCapture(
+        ok=True, title="Post", caption="A useful post", degraded=True,
+        thumbnail_url="https://images.instagram.com/cover.jpg"))
+    res = service.capture_url("https://www.instagram.com/p/example/", 1)
+    assert res.ok and res.thumbnail_url == "https://images.instagram.com/cover.jpg"
 
 
 def test_capture_url_loginwall(stub_pipeline, monkeypatch):

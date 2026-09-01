@@ -95,7 +95,7 @@ class _FakeP:
 
 def test_capture_degraded(monkeypatch, tmp_path):
     meta = {"title": "Some reel", "caption": "Here is the caption",
-            "author": "somecreator", "video": ""}
+            "author": "somecreator", "image": "/cover.jpg", "video": ""}
     monkeypatch.setattr(social_capture, "sync_playwright", lambda: _FakeP(_FakePage(meta)))
     monkeypatch.setattr(config, "SOCIAL_BROWSER_PROFILE", str(tmp_path / "profile"))
     cap = social_capture.capture("https://www.instagram.com/reel/x/")
@@ -103,6 +103,7 @@ def test_capture_degraded(monkeypatch, tmp_path):
     assert cap.degraded
     assert cap.caption == "Here is the caption"
     assert cap.author == "somecreator"
+    assert cap.thumbnail_url == "https://www.instagram.com/cover.jpg"
     assert cap.file_path == ""
 
 
@@ -115,3 +116,7 @@ def test_capture_login_wall(monkeypatch, tmp_path):
     cap = social_capture.capture("https://www.instagram.com/reel/x/")
     assert not cap.ok
     assert "login" in cap.error.lower()
+
+
+def test_safe_preview_url_rejects_non_web_schemes():
+    assert social_capture._safe_preview_url("javascript:alert(1)", "https://instagram.com/p/x") == ""

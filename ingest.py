@@ -48,6 +48,40 @@ def _http_get_json(url, headers=None, timeout=30):
         return json.loads(r.read().decode("utf-8"))
 
 
+def youtube_thumbnail_url(url):
+    """Return YouTube's stable public thumbnail URL for a video link."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host = parsed.netloc.lower().removeprefix("www.").removeprefix("m.")
+        if host == "youtu.be":
+            video_id = parsed.path.strip("/").split("/", 1)[0]
+        elif host == "youtube.com":
+            video_id = urllib.parse.parse_qs(parsed.query).get("v", [""])[0]
+        else:
+            return ""
+    except ValueError:
+        return ""
+    if re.fullmatch(r"[A-Za-z0-9_-]{6,}", video_id or ""):
+        return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+    return ""
+
+
+def video_thumbnail_url(url):
+    """Best-effort public thumbnail lookup without downloading the video."""
+    try:
+        proc = subprocess.run(
+            [YTDLP, "--no-update", "--skip-download", "--impersonate", "chrome", "-J", url],
+            capture_output=True, text=True, timeout=60,
+        )
+        if proc.returncode != 0:
+            return ""
+        thumbnail = (json.loads(proc.stdout).get("thumbnail") or "").strip()
+        parsed = urllib.parse.urlparse(thumbnail)
+        return thumbnail if parsed.scheme in {"http", "https"} and parsed.netloc else ""
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, json.JSONDecodeError):
+        return ""
+
+
 def _download_to(url, dest):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as f:
@@ -210,6 +244,7 @@ def _via_ytdlp(url, dest):
                 "title": (j.get("title") or "").strip(),
                 "description": (j.get("description") or "").strip(),
                 "uploader": (j.get("uploader") or "").strip(),
+                "thumbnail": (j.get("thumbnail") or "").strip(),
             }
     except Exception:
         pass
@@ -478,6 +513,7 @@ class _TextExtractor(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.title = ""
         self.description = ""
+        self.preview_url = ""
         self._chunks = []
         self._skip_depth = 0
         self._in_title = False
@@ -512,6 +548,8 @@ class _TextExtractor(HTMLParser):
                 self.title = content
             elif key in ("og:description", "description") and not self.description and content:
                 self.description = content
+            elif key in ("og:image", "twitter:image", "twitter:image:src") and not self.preview_url and content:
+                self.preview_url = content
         elif tag in self.BLOCK:
             self._chunks.append("\n")
 
@@ -622,8 +660,21 @@ def _gunzip(data, limit):
     return bytes(out[:limit])
 
 
-def fetch_text(url):
-    """Fetch a URL and extract readable text. Returns (ok, text, error).
+def _safe_preview_url(candidate, page_url):
+    """Resolve a page image safely. The app only loads normal web URLs."""
+    try:
+        resolved = urllib.parse.urljoin(page_url, candidate)
+        parsed = urllib.parse.urlparse(resolved)
+    except (TypeError, ValueError):
+        return ""
+    return resolved if parsed.scheme in {"http", "https"} and parsed.netloc else ""
+
+
+def fetch_text(url, include_preview=False):
+    """Fetch a URL and extract readable text.
+
+    Returns ``(ok, text, error)`` by default. ``include_preview=True`` adds a
+    safe Open Graph or Twitter image URL as a fourth value for native clients.
 
     Handles HTML (title + description + body) and plain text. Accepts gzip
     (Content-Encoding / magic bytes) transparently, whitelists text/* and
@@ -640,21 +691,25 @@ def fetch_text(url):
             ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             data = r.read(_MAX_PAGE_BYTES)
     except Exception as e:
-        return False, "", repr(e)
+        result = (False, "", repr(e))
+        return (*result, "") if include_preview else result
 
     # Transparent gzip: some servers send gzip with the wrong/absent
     # Content-Encoding header, so sniff the magic bytes as well.
     if data[:2] == b"\x1f\x8b":
         data = _gunzip(data, _MAX_PAGE_BYTES)
         if data is None:
-            return False, "", "couldn't decompress that response"
+            result = (False, "", "couldn't decompress that response")
+            return (*result, "") if include_preview else result
 
     # Content-type gate: whitelist text/* and XHTML; reject obvious binaries.
     if ctype:
         if ctype in _UNSUPPORTED_CTYPES or ctype.startswith(_UNSUPPORTED_CTYPE_PREFIXES):
-            return False, "", f"this file type isn't supported yet ({ctype})"
+            result = (False, "", f"this file type isn't supported yet ({ctype})")
+            return (*result, "") if include_preview else result
         if not (ctype.startswith("text/") or ctype in _HTML_CTYPES):
-            return False, "", f"this file type isn't supported yet ({ctype})"
+            result = (False, "", f"this file type isn't supported yet ({ctype})")
+            return (*result, "") if include_preview else result
 
     try:
         html = data.decode("utf-8", errors="replace")
@@ -662,13 +717,29 @@ def fetch_text(url):
         html = data.decode("latin-1", errors="replace")
 
     if ctype in _HTML_CTYPES or "<html" in html[:500].lower():
-        text = _html_to_text(html)
+        parser = _TextExtractor()
+        try:
+            parser.feed(_close_unclosed_title(html))
+        except Exception:
+            pass
+        head = []
+        if parser.title:
+            head.append("TITLE: " + parser.title)
+        if parser.description:
+            head.append("DESCRIPTION: " + parser.description)
+        body = parser.text()
+        text = "\n\n".join(head + (["", body] if head else [body])).strip()
+        preview_url = _safe_preview_url(parser.preview_url, url)
     else:
         text = html.strip()
+        preview_url = ""
 
     if _looks_binary(text):
-        return False, "", "couldn't read that content (binary or garbled data)"
+        result = (False, "", "couldn't read that content (binary or garbled data)")
+        return (*result, "") if include_preview else result
 
     if not text.strip():
-        return False, "", "no readable text on that page"
-    return True, text.strip()[:_MAX_TEXT_CHARS], ""
+        result = (False, "", "no readable text on that page")
+        return (*result, "") if include_preview else result
+    result = (True, text.strip()[:_MAX_TEXT_CHARS], "")
+    return (*result, preview_url) if include_preview else result

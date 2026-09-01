@@ -41,6 +41,7 @@ class SocialCapture:
     caption: str = ""
     author: str = ""
     title: str = ""
+    thumbnail_url: str = ""  # safe public Open Graph source image
     engagement: dict = field(default_factory=dict)
     degraded: bool = False    # metadata-only (no video)
     error: str = ""
@@ -84,6 +85,7 @@ def _extract_meta(page):
         title: meta('og:title') || document.title || '',
         caption: meta('og:description') || '',
         author: meta('article:author') || meta('og:site_name') || '',
+        image: meta('og:image') || meta('twitter:image') || '',
         video: vsrc,
       };
     }"""
@@ -94,6 +96,15 @@ def _download(url, dest, referer):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": referer})
     with urllib.request.urlopen(req, timeout=120) as r, open(dest, "wb") as f:
         shutil.copyfileobj(r, f)
+
+
+def _safe_preview_url(candidate, page_url):
+    try:
+        value = urllib.parse.urljoin(page_url, candidate or "")
+        parsed = urllib.parse.urlparse(value)
+    except (TypeError, ValueError):
+        return ""
+    return value if parsed.scheme in {"http", "https"} and parsed.netloc else ""
 
 
 def capture(url, timeout_s=90):
@@ -128,6 +139,7 @@ def capture(url, timeout_s=90):
                 title = (meta.get("title") or "").strip()
                 caption = (meta.get("caption") or "").strip()
                 author = (meta.get("author") or "").strip()
+                thumbnail_url = _safe_preview_url(meta.get("image"), page.url)
                 video = (meta.get("video") or "").strip()
 
                 if video.startswith("http"):
@@ -136,13 +148,15 @@ def capture(url, timeout_s=90):
                         if Path(dest).stat().st_size > 10_000:
                             return SocialCapture(
                                 ok=True, platform=platform, file_path=dest,
-                                caption=caption, author=author, title=title)
+                                caption=caption, author=author, title=title,
+                                thumbnail_url=thumbnail_url)
                     except Exception:
                         pass  # fall through to degraded metadata
                 if caption or title:
                     return SocialCapture(
                         ok=True, platform=platform, caption=caption,
-                        author=author, title=title, degraded=True)
+                        author=author, title=title, thumbnail_url=thumbnail_url,
+                        degraded=True)
                 return SocialCapture(
                     ok=False, platform=platform,
                     error="couldn't extract the video or caption from that page")

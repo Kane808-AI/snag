@@ -293,6 +293,24 @@ def test_update_item_fields_ignores_ai_fields(fresh_db):
     assert db.get_vault_item(1, vid)["summary"] == "summary is ai-owned"
 
 
+def test_update_item_fields_adds_and_removes_tags_without_replacing_auto_tags(fresh_db):
+    vid = make_item(1, "tags", tags="auto-one,auto-two")
+    assert db.update_item_fields(vid, {"add_tags": ["User-One", "auto-one"]})
+    assert db.get_vault_item(1, vid)["tags"] == "auto-one,auto-two,user-one"
+    assert db.update_item_fields(vid, {"remove_tags": ["AUTO-two"]})
+    assert db.get_vault_item(1, vid)["tags"] == "auto-one,user-one"
+    with pytest.raises(ValueError):
+        db.update_item_fields(vid, {"add_tags": "not-a-list"})
+
+
+def test_update_item_fields_writes_and_clears_snooze(fresh_db):
+    vid = make_item(1, "snooze me")
+    assert db.update_item_fields(vid, {"snooze_until": 2_000_000_000})
+    assert db.get_vault_item(1, vid)["snooze_until"] == 2_000_000_000
+    assert db.update_item_fields(vid, {"snooze_until": None})
+    assert db.get_vault_item(1, vid)["snooze_until"] is None
+
+
 def test_save_note_persists_content_fields(fresh_db):
     note = {
         "summary": "content aware",
@@ -305,9 +323,20 @@ def test_save_note_persists_content_fields(fresh_db):
         "tags": ["a"],
     }
     triage = {"stage": "Reference", "action_type": "Just reference", "impact": 3, "effort": 3}
-    vid = db.save_note(1, "https://tiktok.com/x", note, "transcript", triage)
+    vid = db.save_note(1, "https://tiktok.com/x", note, "transcript", triage,
+                       thumbnail_url="https://images.example.com/cover.jpg")
     row = db.get_vault_item(1, vid)
     assert row["why_it_worked"] == "curiosity gap hook"
     assert row["reusable_pattern"] == "[x] wrong -> [fix]"
     import json
     assert json.loads(row["engagement"]) == {"view_count": 5000, "save_count": 400}
+    assert row["thumbnail_url"] == "https://images.example.com/cover.jpg"
+
+
+def test_set_thumbnail_url_only_fills_a_blank_value(fresh_db):
+    vid = make_item(1, "preview")
+    assert db.set_thumbnail_url(1, vid, "https://images.example.com/cover.jpg")
+    assert not db.set_thumbnail_url(1, vid, "https://images.example.com/new-cover.jpg")
+    assert db.get_vault_item(1, vid)["thumbnail_url"] == "https://images.example.com/cover.jpg"
+    with pytest.raises(ValueError):
+        db.set_thumbnail_url(1, vid, "file:///private/cover.jpg")

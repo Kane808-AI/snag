@@ -120,6 +120,46 @@ def test_html_to_text_extracts_title_description_and_body():
     assert "color:red" not in text
 
 
+def test_fetch_text_returns_safe_open_graph_preview(monkeypatch):
+    body = (b"<html><head><meta property='og:image' content='/images/cover.jpg'>"
+            b"</head><body><p>article body</p></body></html>")
+    monkeypatch.setattr(ingest.urllib.request, "urlopen",
+                        lambda req, timeout=30: _fake_resp(body))
+    ok, text, err, preview = ingest.fetch_text("https://example.com/story", include_preview=True)
+    assert ok and err == "" and "article body" in text
+    assert preview == "https://example.com/images/cover.jpg"
+
+
+def test_fetch_text_rejects_non_web_preview(monkeypatch):
+    body = (b"<html><head><meta property='og:image' content='javascript:alert(1)'>"
+            b"</head><body><p>article body</p></body></html>")
+    monkeypatch.setattr(ingest.urllib.request, "urlopen",
+                        lambda req, timeout=30: _fake_resp(body))
+    ok, _text, _err, preview = ingest.fetch_text("https://example.com/story", include_preview=True)
+    assert ok and preview == ""
+
+
+def test_youtube_thumbnail_url():
+    assert ingest.youtube_thumbnail_url("https://youtu.be/dQw4w9WgXcQ").endswith("/dQw4w9WgXcQ/hqdefault.jpg")
+    assert ingest.youtube_thumbnail_url("https://youtube.com/watch?v=dQw4w9WgXcQ").endswith("/dQw4w9WgXcQ/hqdefault.jpg")
+    assert ingest.youtube_thumbnail_url("https://example.com/?v=dQw4w9WgXcQ") == ""
+
+
+def test_video_thumbnail_url_uses_metadata_only(monkeypatch):
+    class Result:
+        returncode = 0
+        stdout = '{"thumbnail":"https://cdn.example.com/cover.jpg"}'
+
+    seen = {}
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        return Result()
+
+    monkeypatch.setattr(ingest.subprocess, "run", fake_run)
+    assert ingest.video_thumbnail_url("https://www.tiktok.com/t/example") == "https://cdn.example.com/cover.jpg"
+    assert "--skip-download" in seen["cmd"]
+
+
 def test_unclosed_title_does_not_swallow_body():
     # No </title>: the body start tag must reset the title state so the body
     # text is still extracted instead of being swallowed into the title.

@@ -18,9 +18,11 @@ Endpoints:
     GET  /api/items/<id>   -> one item
     GET  /api/stats        -> counts by stage/status
     GET  /api/tags         -> tag list with counts
-    PATCH /api/items/<id>  -> write-back {status|stage|impact|effort}
+    PATCH /api/items/<id>  -> write-back {status|stage|impact|effort|snooze_until|add_tags|remove_tags}
     POST /api/capture      -> analyze a {url} into a note preview (unsaved)
     POST /api/items        -> save a previewed capture into the vault
+    POST /api/items/<id>/ask -> answer a {question} from one saved item
+    POST /api/ask          -> answer a {question} from relevant saved items
 """
 import json
 import sys
@@ -167,6 +169,41 @@ class Handler(BaseHTTPRequestHandler):
 
         path = urlparse(self.path).path
 
+        if path == "/api/ask":
+            question = body.get("question")
+            if not isinstance(question, str):
+                return self._json(400, {"error": "question required"})
+            try:
+                answer, sources, mode = api.answer_library_question(question)
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+            except Exception as e:
+                print(f"[library ask] failed: {type(e).__name__}: {e}", file=sys.stderr)
+                return self._json(502, {"error": "Snag could not answer right now"})
+            return self._json(200, {"answer": answer, "sources": sources, "mode": mode})
+
+        if path.startswith("/api/items/") and path.endswith("/ask"):
+            try:
+                item_id = int(path.removeprefix("/api/items/").removesuffix("/ask"))
+            except ValueError:
+                return self._json(404, {"error": "bad id"})
+            question = body.get("question")
+            if not isinstance(question, str):
+                return self._json(400, {"error": "question required"})
+            item = api.get_item(item_id)
+            if item is None:
+                return self._json(404, {"error": "not found"})
+            try:
+                answer, mode = api.answer_item_question(item, question)
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+            except Exception as e:
+                # Keep the client response private and stable, but preserve a
+                # local diagnostic that never includes credentials or source text.
+                print(f"[ask] failed: {type(e).__name__}: {e}", file=sys.stderr)
+                return self._json(502, {"error": "Snag could not answer right now"})
+            return self._json(200, {"answer": answer, "mode": mode})
+
         if path == "/api/capture":
             url = (body.get("url") or "").strip()
             if not url:
@@ -191,6 +228,7 @@ class Handler(BaseHTTPRequestHandler):
                     "transcript": res.transcript,
                     "content_type": res.content_type,
                     "url": res.url,
+                    "thumbnail_url": res.thumbnail_url,
                 },
             })
 
@@ -199,6 +237,11 @@ class Handler(BaseHTTPRequestHandler):
             triage = body.get("triage")
             if not isinstance(note, dict) or not isinstance(triage, dict):
                 return self._json(400, {"error": "note and triage must be objects"})
+            existing_id = db.existing_note_for_source(
+                WEB_USER_ID, body.get("url") or "", include_all_users=True
+            )
+            if existing_id is not None:
+                return self._json(200, {"ok": True, "id": existing_id, "duplicate": True})
             try:
                 item_id = db.save_note(
                     WEB_USER_ID,
@@ -207,10 +250,11 @@ class Handler(BaseHTTPRequestHandler):
                     body.get("transcript") or "",
                     triage,
                     body.get("content_type") or "video",
+                    body.get("thumbnail_url") or "",
                 )
             except Exception as e:
                 return self._json(500, {"error": repr(e)})
-            return self._json(200, {"ok": True, "id": item_id})
+            return self._json(200, {"ok": True, "id": item_id, "duplicate": False})
 
         self._json(404, {"error": "not found"})
 

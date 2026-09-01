@@ -16,6 +16,7 @@ human-facing `error`/`duration` so each surface maps it to its own UI copy.
 """
 
 from dataclasses import dataclass, field
+import re
 
 import config
 import db
@@ -34,6 +35,7 @@ class CaptureResult:
     content_type: str = "video"                    # "video" | "article" | "text"
     url: str = ""
     engagement: dict = field(default_factory=dict)
+    thumbnail_url: str = ""
     # failure payload
     kind: str = ""      # "" | "duration" | "analyze" | "file_empty" | "social" |
                         # "social_empty" | "loginwall" | "fetch" | "ingest"
@@ -65,27 +67,59 @@ def _analyze(transcript, engagement=None, caption=""):
     return note, triage, transcript
 
 
-def _success(note, triage, transcript, content_type, url, engagement):
+def _success(note, triage, transcript, content_type, url, engagement, thumbnail_url=""):
     return CaptureResult(
         ok=True, note=note, triage=triage, transcript=transcript,
         content_type=content_type, url=url,
         engagement=engagement or note.get("engagement") or {},
+        thumbnail_url=thumbnail_url,
     )
 
 
+def _offline_note(text, engagement=None):
+    """Create an honest, saveable Inbox reference when analysis is unavailable.
+
+    Capture must not depend on a paid model being reachable. This deliberately
+    does not invent key ideas, tags, or recommendations. The extracted source
+    text stays available for a later AI pass.
+    """
+    normalized = re.sub(r"\s+", " ", (text or "").strip())
+    title = normalized[:180].rsplit(" ", 1)[0] if len(normalized) > 180 else normalized
+    return {
+        "summary": title or "Saved link",
+        "key_ideas": "",
+        "why_it_worked": "",
+        "why_it_matters": "AI analysis is temporarily unavailable. The original content was saved for review.",
+        "reusable_pattern": "",
+        "recommendations": "",
+        "tags": [],
+        "engagement": engagement or {},
+        "raw": "",
+    }
+
+
 def capture_text(text, user_id, url="", engagement=None, caption="",
-                 content_type="text"):
+                 content_type="text", thumbnail_url=""):
     """Analyze text that is already available (paste, caption, native transcript)."""
     if not (text or "").strip():
         return CaptureResult(ok=False, kind="file_empty", error="")
     try:
         note, triage, transcript = _analyze(text, engagement=engagement, caption=caption)
     except Exception:
-        return CaptureResult(ok=False, kind="analyze", error="")
-    return _success(note, triage, transcript, content_type, url, engagement)
+        transcript = f"Caption: {caption.strip()}\n\n{text}".strip() if caption else text.strip()
+        return _success(
+            _offline_note(transcript, engagement),
+            {"stage": "Inbox", "action_type": "Just reference", "impact": 3, "effort": 3},
+            transcript,
+            content_type,
+            url,
+            engagement,
+            thumbnail_url,
+        )
+    return _success(note, triage, transcript, content_type, url, engagement, thumbnail_url)
 
 
-def capture_file(file_path, user_id, url="", engagement=None, caption=""):
+def capture_file(file_path, user_id, url="", engagement=None, caption="", thumbnail_url=""):
     """Transcribe a local media file, then analyze. Caption fallback when silent."""
     dur = ingest.probe_file_duration(file_path) if _is_free(user_id) else None
     if _duration_gate(user_id, dur):
@@ -98,10 +132,10 @@ def capture_file(file_path, user_id, url="", engagement=None, caption=""):
         if (caption or "").strip():
             # No speech to transcribe (music-only / slideshow); analyze the caption.
             return capture_text(caption, user_id, url=url, engagement=engagement,
-                                content_type="article")
+                                content_type="article", thumbnail_url=thumbnail_url)
         return CaptureResult(ok=False, kind="file_empty", error="")
     return capture_text(transcript, user_id, url=url, engagement=engagement,
-                        caption=caption, content_type="video")
+                        caption=caption, content_type="video", thumbnail_url=thumbnail_url)
 
 
 def capture_url(url, user_id):
@@ -121,16 +155,18 @@ def _capture_video(url, user_id):
     if ingest.is_youtube(url):
         ok, transcript, _err = ingest.youtube_transcript(url)
         if ok:
-            return capture_text(transcript, user_id, url=url, content_type="video")
+            return capture_text(transcript, user_id, url=url, content_type="video",
+                                thumbnail_url=ingest.youtube_thumbnail_url(url))
     result = ingest.ingest(url)
     if not result.ok:
         return CaptureResult(ok=False, kind="ingest", error=result.error, url=url)
     if _duration_gate(user_id, result.duration):
         return CaptureResult(ok=False, kind="duration", duration=result.duration)
+    thumbnail_url = (result.meta or {}).get("thumbnail") or ""
     if result.native_transcript.strip():
         return capture_text(result.native_transcript, user_id, url=url,
-                            engagement=result.engagement, content_type="video")
-    return capture_file(result.file_path, user_id, url=url, engagement=result.engagement)
+                            engagement=result.engagement, content_type="video", thumbnail_url=thumbnail_url)
+    return capture_file(result.file_path, user_id, url=url, engagement=result.engagement, thumbnail_url=thumbnail_url)
 
 
 def _capture_social(url, user_id):
@@ -146,27 +182,36 @@ def _capture_social(url, user_id):
             caption = "\n\n".join(
                 x for x in (meta.get("description"), meta.get("title")) if x).strip()
             return capture_file(result.file_path, user_id, url=url,
-                                engagement=result.engagement, caption=caption)
+                                engagement=result.engagement, caption=caption,
+                                thumbnail_url=(meta.get("thumbnail") or ""))
     cap = social_capture.capture(url)
     if not cap.ok:
         return CaptureResult(ok=False, kind="social",
                              error=cap.error or "I couldn't capture that.", url=url)
     if cap.file_path:
         return capture_file(cap.file_path, user_id, url=url,
-                            engagement=cap.engagement, caption=cap.caption)
+                            engagement=cap.engagement, caption=cap.caption,
+                            thumbnail_url=cap.thumbnail_url)
     if cap.caption or cap.title:
         text = "\n\n".join(x for x in (cap.title, cap.caption) if x).strip()
         return capture_text(text, user_id, url=url, engagement=cap.engagement,
-                            content_type="article")
+                            content_type="article", thumbnail_url=cap.thumbnail_url)
     return CaptureResult(ok=False, kind="social_empty", error="", url=url)
 
 
 def _capture_text_url(url, user_id):
     """Text path for any non-video, non-social URL: fetch, extract, analyze."""
-    ok, text, err = ingest.fetch_text(url)
+    try:
+        fetched = ingest.fetch_text(url, include_preview=True)
+    except TypeError:
+        # Keeps older adapters and deliberately simple test doubles compatible.
+        fetched = ingest.fetch_text(url)
+    ok, text, err = fetched[:3]
+    thumbnail_url = fetched[3] if len(fetched) > 3 else ""
     if not ok:
         platform = ingest.is_social_blocked(url)
         if platform:
             return CaptureResult(ok=False, kind="loginwall", error=platform, url=url)
         return CaptureResult(ok=False, kind="fetch", error=err or "", url=url)
-    return capture_text(text, user_id, url=url, content_type="article")
+    return capture_text(text, user_id, url=url, content_type="article",
+                        thumbnail_url=thumbnail_url)
