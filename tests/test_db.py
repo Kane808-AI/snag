@@ -333,6 +333,40 @@ def test_save_note_persists_content_fields(fresh_db):
     assert row["thumbnail_url"] == "https://images.example.com/cover.jpg"
 
 
+def test_analysis_state_and_in_place_reanalysis_preserve_source_fields(fresh_db):
+    fallback = {"summary": "Fallback", "key_ideas": "", "why_it_worked": "", "why_it_matters": "Waiting", "reusable_pattern": "", "recommendations": "", "tags": [], "engagement": {}}
+    triage = {"stage": "Inbox", "action_type": "Just reference", "impact": 3, "effort": 3}
+    item_id = db.save_note(1, "https://example.com/source", fallback, "saved transcript", triage, "article", "https://example.com/thumb", analysis_state="awaiting_ai")
+    before = db.get_vault_item(1, item_id)
+    updated = db.update_analysis_in_place(item_id, {"summary": "Complete", "key_ideas": "Idea", "why_it_worked": "Hook", "why_it_matters": "Useful", "reusable_pattern": "Pattern", "recommendations": "Try it", "tags": ["ai"], "engagement": {"likes": 1}}, {"stage": "Worth Acting On", "action_type": "Try this", "impact": 5, "effort": 2})
+    after = db.get_vault_item(1, item_id)
+    preserved = ("id", "source_url", "thumbnail_url", "transcript", "content_type", "status", "snooze_until", "ts")
+    assert updated is True
+    assert after["analysis_state"] == "complete"
+    assert after["summary"] == "Complete"
+    assert {key: after[key] for key in preserved} == {key: before[key] for key in preserved}
+
+
+def test_existing_analysis_state_defaults_to_complete(fresh_db):
+    item_id = make_item(1, "Existing save")
+    assert db.get_vault_item(1, item_id)["analysis_state"] == "complete"
+
+
+def test_init_marks_legacy_fallback_notes_as_awaiting_ai(fresh_db):
+    note = {
+        "summary": "Saved source",
+        "why_it_matters": "AI analysis is temporarily unavailable. The original content was saved for review.",
+        "tags": [],
+    }
+    triage = {"stage": "Inbox", "action_type": "Just reference", "impact": 3, "effort": 3}
+    item_id = db.save_note(1, "https://example.com/legacy", note, "source text", triage, "article")
+    assert db.get_vault_item(1, item_id)["analysis_state"] == "complete"
+
+    db.init()
+
+    assert db.get_vault_item(1, item_id)["analysis_state"] == "awaiting_ai"
+
+
 def test_set_thumbnail_url_only_fills_a_blank_value(fresh_db):
     vid = make_item(1, "preview")
     assert db.set_thumbnail_url(1, vid, "https://images.example.com/cover.jpg")

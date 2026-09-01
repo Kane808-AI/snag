@@ -32,6 +32,7 @@ def test_capture_text_analyzes(stub_pipeline):
     assert res.note["summary"] == "AI tools"
     assert res.triage["stage"] == "Worth Acting On"
     assert res.content_type == "text"
+    assert res.analysis_state == "complete"
 
 
 def test_capture_text_empty_is_rejected(stub_pipeline):
@@ -51,6 +52,7 @@ def test_capture_text_saves_an_honest_reference_when_analysis_fails(stub_pipelin
     assert res.note["why_it_matters"] == "AI analysis is temporarily unavailable. The original content was saved for review."
     assert res.note["tags"] == []
     assert res.triage["stage"] == "Inbox"
+    assert res.analysis_state == "awaiting_ai"
 
 
 def test_capture_url_routes_video(fresh_db, stub_pipeline, monkeypatch):

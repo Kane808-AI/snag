@@ -36,6 +36,7 @@ class CaptureResult:
     url: str = ""
     engagement: dict = field(default_factory=dict)
     thumbnail_url: str = ""
+    analysis_state: str = "complete"  # "complete" | "awaiting_ai"
     # failure payload
     kind: str = ""      # "" | "duration" | "analyze" | "file_empty" | "social" |
                         # "social_empty" | "loginwall" | "fetch" | "ingest"
@@ -67,12 +68,13 @@ def _analyze(transcript, engagement=None, caption=""):
     return note, triage, transcript
 
 
-def _success(note, triage, transcript, content_type, url, engagement, thumbnail_url=""):
+def _success(note, triage, transcript, content_type, url, engagement, thumbnail_url="", analysis_state="complete"):
     return CaptureResult(
         ok=True, note=note, triage=triage, transcript=transcript,
         content_type=content_type, url=url,
         engagement=engagement or note.get("engagement") or {},
         thumbnail_url=thumbnail_url,
+        analysis_state=analysis_state,
     )
 
 
@@ -89,7 +91,7 @@ def _offline_note(text, engagement=None):
         "summary": title or "Saved link",
         "key_ideas": "",
         "why_it_worked": "",
-        "why_it_matters": "AI analysis is temporarily unavailable. The original content was saved for review.",
+        "why_it_matters": db.AWAITING_AI_MESSAGE,
         "reusable_pattern": "",
         "recommendations": "",
         "tags": [],
@@ -115,6 +117,7 @@ def capture_text(text, user_id, url="", engagement=None, caption="",
             url,
             engagement,
             thumbnail_url,
+            "awaiting_ai",
         )
     return _success(note, triage, transcript, content_type, url, engagement, thumbnail_url)
 

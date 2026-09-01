@@ -16,6 +16,10 @@ import config
 
 # Status lifecycle: inbox -> in progress -> done -> archived (cycles back to inbox)
 STATUS_CYCLE = ["inbox", "in progress", "done", "archived"]
+ANALYSIS_STATES = {"complete", "awaiting_ai"}
+AWAITING_AI_MESSAGE = (
+    "AI analysis is temporarily unavailable. The original content was saved for review."
+)
 
 # Short aliases users can type for stage filters (/vault act, /search stage:act)
 _STAGE_ALIASES = {
@@ -87,6 +91,7 @@ def init():
                 effort          INTEGER DEFAULT 3,
                 status          TEXT DEFAULT 'inbox',
                 snooze_until    INTEGER,
+                analysis_state  TEXT NOT NULL DEFAULT 'complete',
                 ts              INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_vault_user ON vault(telegram_id);
@@ -163,6 +168,16 @@ def init():
             c.execute("ALTER TABLE vault ADD COLUMN engagement TEXT")
         if "thumbnail_url" not in cols:
             c.execute("ALTER TABLE vault ADD COLUMN thumbnail_url TEXT")
+        if "analysis_state" not in cols:
+            c.execute("ALTER TABLE vault ADD COLUMN analysis_state TEXT NOT NULL DEFAULT 'complete'")
+        c.execute("UPDATE vault SET analysis_state='complete' WHERE analysis_state IS NULL OR analysis_state='' ")
+        # Captures saved before analysis_state existed used this exact honest
+        # fallback marker. Promote those rows so they remain recoverable.
+        c.execute(
+            "UPDATE vault SET analysis_state='awaiting_ai' "
+            "WHERE analysis_state='complete' AND why_it_matters=?",
+            (AWAITING_AI_MESSAGE,),
+        )
         # Status normalization: the pre-increment default was 'New'.
         c.execute("UPDATE vault SET status='inbox' WHERE status='New'")
         c.execute("UPDATE vault SET status=lower(status) WHERE status IN "
@@ -278,15 +293,17 @@ def existing_note_for_source(telegram_id, source_url, include_all_users=False):
     return None
 
 
-def save_note(telegram_id, source_url, note, transcript, triage, content_type="video", thumbnail_url=""):
+def save_note(telegram_id, source_url, note, transcript, triage, content_type="video", thumbnail_url="", analysis_state="complete"):
     """Store the full enriched note + triage. Returns the new row id."""
+    if analysis_state not in ANALYSIS_STATES:
+        raise ValueError(f"invalid analysis_state: {analysis_state}")
     with _conn() as c:
         cur = c.execute(
             "INSERT INTO vault (telegram_id, source_url, thumbnail_url, summary, key_ideas, "
             "why_it_worked, why_it_matters, reusable_pattern, recommendations, "
             "tags, transcript, content_type, engagement, "
-            "stage, action_type, impact, effort, status, ts) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "stage, action_type, impact, effort, status, analysis_state, ts) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 telegram_id,
                 source_url,
@@ -306,6 +323,7 @@ def save_note(telegram_id, source_url, note, transcript, triage, content_type="v
                 triage.get("impact", 3),
                 triage.get("effort", 3),
                 "inbox",
+                analysis_state,
                 int(time.time()),
             ),
         )
@@ -572,6 +590,26 @@ def update_note(telegram_id, item_id, note):
                 item_id,
             ),
         )
+
+
+def update_analysis_in_place(item_id, note, triage):
+    """Complete one pending AI analysis without altering saved source or lifecycle fields."""
+    with _conn() as c:
+        cur = c.execute(
+            "UPDATE vault SET summary=?, key_ideas=?, why_it_worked=?, why_it_matters=?, "
+            "reusable_pattern=?, recommendations=?, tags=?, engagement=?, stage=?, action_type=?, "
+            "impact=?, effort=?, analysis_state='complete' "
+            "WHERE id=? AND analysis_state='awaiting_ai'",
+            (
+                note.get("summary", ""), note.get("key_ideas", ""), note.get("why_it_worked", ""),
+                note.get("why_it_matters", ""), note.get("reusable_pattern", ""),
+                note.get("recommendations", ""), ",".join(note.get("tags", [])),
+                json.dumps(note.get("engagement") or {}), triage.get("stage", "Inbox"),
+                triage.get("action_type", "Just reference"), triage.get("impact", 3),
+                triage.get("effort", 3), item_id,
+            ),
+        )
+        return cur.rowcount > 0
 
 
 def delete_note(telegram_id, item_id):

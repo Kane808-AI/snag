@@ -21,6 +21,7 @@ Endpoints:
     PATCH /api/items/<id>  -> write-back {status|stage|impact|effort|snooze_until|add_tags|remove_tags}
     POST /api/capture      -> analyze a {url} into a note preview (unsaved)
     POST /api/items        -> save a previewed capture into the vault
+    POST /api/items/<id>/reanalyze -> retry pending AI analysis in place
     POST /api/items/<id>/ask -> answer a {question} from one saved item
     POST /api/ask          -> answer a {question} from relevant saved items
 """
@@ -229,6 +230,7 @@ class Handler(BaseHTTPRequestHandler):
                     "content_type": res.content_type,
                     "url": res.url,
                     "thumbnail_url": res.thumbnail_url,
+                    "analysis_state": res.analysis_state,
                 },
             })
 
@@ -237,6 +239,9 @@ class Handler(BaseHTTPRequestHandler):
             triage = body.get("triage")
             if not isinstance(note, dict) or not isinstance(triage, dict):
                 return self._json(400, {"error": "note and triage must be objects"})
+            analysis_state = body.get("analysis_state") or "complete"
+            if analysis_state not in db.ANALYSIS_STATES:
+                return self._json(400, {"error": "invalid analysis_state"})
             existing_id = db.existing_note_for_source(
                 WEB_USER_ID, body.get("url") or "", include_all_users=True
             )
@@ -251,10 +256,36 @@ class Handler(BaseHTTPRequestHandler):
                     triage,
                     body.get("content_type") or "video",
                     body.get("thumbnail_url") or "",
+                    analysis_state,
                 )
             except Exception as e:
                 return self._json(500, {"error": repr(e)})
             return self._json(200, {"ok": True, "id": item_id, "duplicate": False})
+
+        if path.startswith("/api/items/") and path.endswith("/reanalyze"):
+            try:
+                item_id = int(path.removeprefix("/api/items/").removesuffix("/reanalyze"))
+            except ValueError:
+                return self._json(404, {"error": "bad id"})
+            item = api.get_item(item_id)
+            if item is None:
+                return self._json(404, {"error": "not found"})
+            if item.get("analysis_state") != "awaiting_ai":
+                return self._json(409, {"error": "analysis is not pending"})
+            try:
+                result = service.capture_text(
+                    item.get("transcript") or "", WEB_USER_ID, url=item.get("source_url") or "",
+                    content_type=item.get("content_type") or "text",
+                    thumbnail_url=item.get("thumbnail_url") or "",
+                )
+            except Exception as e:
+                print(f"[reanalyze] failed: {type(e).__name__}: {e}", file=sys.stderr)
+                return self._json(503, {"error": "AI analysis is still unavailable"})
+            if not result.ok or result.analysis_state != "complete":
+                return self._json(503, {"error": "AI analysis is still unavailable"})
+            if not db.update_analysis_in_place(item_id, result.note, result.triage):
+                return self._json(409, {"error": "analysis is not pending"})
+            return self._json(200, api.get_item(item_id))
 
         self._json(404, {"error": "not found"})
 

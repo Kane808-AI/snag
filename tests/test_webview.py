@@ -376,6 +376,7 @@ def test_post_capture_analyzes_url_and_strips_raw(monkeypatch, tmp_path):
         assert payload["preview"]["note"]["summary"] == "s"
         assert "raw" not in payload["preview"]["note"]
         assert payload["preview"]["triage"]["stage"] == "Inbox"
+        assert payload["preview"]["analysis_state"] == "complete"
     finally:
         srv.shutdown()
         srv.server_close()
@@ -406,12 +407,29 @@ def test_post_items_saves_note(monkeypatch, tmp_path):
         note = {"summary": "hello", "key_ideas": "k", "tags": ["a"], "engagement": {}}
         triage = {"stage": "Inbox", "action_type": "Just reference", "impact": 3, "effort": 3}
         body = {"url": "https://x.com/1", "note": note, "triage": triage,
-                "transcript": "t", "content_type": "article"}
+                "transcript": "t", "content_type": "article", "analysis_state": "awaiting_ai"}
         status, payload = _post(port, "/api/items", body)
         assert status == 200 and payload["ok"] is True
         item = db.get_vault_item(server.WEB_USER_ID, payload["id"])
         assert item and item["summary"] == "hello"
         assert item["content_type"] == "article"
+        assert item["analysis_state"] == "awaiting_ai"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_post_items_rejects_invalid_analysis_state(monkeypatch, tmp_path):
+    srv = _start_viewer(tmp_path, monkeypatch)
+    try:
+        note = {"summary": "hello", "key_ideas": "", "tags": [], "engagement": {}}
+        triage = {"stage": "Inbox", "action_type": "Just reference", "impact": 3, "effort": 3}
+        body = {"url": "https://x.com/invalid-state", "note": note, "triage": triage,
+                "transcript": "t", "content_type": "article", "analysis_state": "bogus"}
+        status, payload = _post(srv.server_address[1], "/api/items", body)
+        assert status == 400
+        assert payload == {"error": "invalid analysis_state"}
+        assert db.all_vault() == []
     finally:
         srv.shutdown()
         srv.server_close()
@@ -450,6 +468,69 @@ def test_post_items_prevents_duplicates_visible_in_shared_mobile_library(monkeyp
         assert status == 200
         assert duplicate == {"ok": True, "id": legacy_id, "duplicate": True}
         assert len(db.all_vault()) == 1
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_post_reanalyze_updates_awaiting_item_in_place(monkeypatch, tmp_path):
+    import service as svc
+
+    srv = _start_viewer(tmp_path, monkeypatch)
+    try:
+        note = {"summary": "Fallback", "key_ideas": "", "tags": [], "engagement": {}}
+        triage = {"stage": "Inbox", "action_type": "Just reference", "impact": 3, "effort": 3}
+        item_id = db.save_note(1, "https://example.com/item", note, "saved source", triage,
+                               "article", "https://example.com/thumb", analysis_state="awaiting_ai")
+        before = db.get_vault_item(1, item_id)
+        result = svc.CaptureResult(ok=True, note={"summary": "Analyzed", "key_ideas": "idea", "tags": ["ai"]},
+                                   triage={"stage": "Worth Acting On", "action_type": "Try this", "impact": 5, "effort": 2},
+                                   transcript="saved source", content_type="article", url="https://example.com/item")
+        monkeypatch.setattr(server.service, "capture_text", lambda *args, **kwargs: result)
+        status, payload = _post(srv.server_address[1], f"/api/items/{item_id}/reanalyze", {})
+        assert status == 200 and payload["summary"] == "Analyzed"
+        assert payload["analysis_state"] == "complete"
+        after = db.get_vault_item(1, item_id)
+        preserved = ("id", "source_url", "thumbnail_url", "transcript", "content_type", "status", "snooze_until", "ts")
+        assert len(db.all_vault()) == 1
+        assert {key: after[key] for key in preserved} == {key: before[key] for key in preserved}
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_post_reanalyze_fallback_leaves_item_retryable(monkeypatch, tmp_path):
+    import service as svc
+
+    srv = _start_viewer(tmp_path, monkeypatch)
+    try:
+        note = {"summary": "Fallback", "key_ideas": "", "tags": [], "engagement": {}}
+        triage = {"stage": "Inbox", "action_type": "Just reference", "impact": 3, "effort": 3}
+        item_id = db.save_note(1, "https://example.com/item", note, "saved source", triage,
+                               analysis_state="awaiting_ai")
+        before = db.get_vault_item(1, item_id)
+        monkeypatch.setattr(server.service, "capture_text", lambda *args, **kwargs: svc.CaptureResult(
+            ok=True, note=note, triage=triage, transcript="saved source", analysis_state="awaiting_ai"))
+        status, payload = _post(srv.server_address[1], f"/api/items/{item_id}/reanalyze", {})
+        assert status == 503 and payload["error"] == "AI analysis is still unavailable"
+        assert db.get_vault_item(1, item_id) == before
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_post_reanalyze_exception_leaves_item_retryable(monkeypatch, tmp_path):
+    srv = _start_viewer(tmp_path, monkeypatch)
+    try:
+        note = {"summary": "Fallback", "key_ideas": "", "tags": [], "engagement": {}}
+        triage = {"stage": "Inbox", "action_type": "Just reference", "impact": 3, "effort": 3}
+        item_id = db.save_note(1, "https://example.com/item", note, "saved source", triage,
+                               analysis_state="awaiting_ai")
+        before = db.get_vault_item(1, item_id)
+        monkeypatch.setattr(server.service, "capture_text", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("provider unavailable")))
+        status, payload = _post(srv.server_address[1], f"/api/items/{item_id}/reanalyze", {})
+        assert status == 503 and payload["error"] == "AI analysis is still unavailable"
+        assert db.get_vault_item(1, item_id) == before
     finally:
         srv.shutdown()
         srv.server_close()

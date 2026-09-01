@@ -20,6 +20,7 @@ import db  # noqa: E402
 _PUBLIC = ("id", "summary", "key_ideas", "why_it_worked", "why_it_matters",
            "reusable_pattern", "recommendations", "engagement",
            "tags", "stage", "action_type", "impact", "effort", "status", "snooze_until",
+           "analysis_state",
            "source_url", "thumbnail_url", "content_type", "transcript", "ts")
 
 

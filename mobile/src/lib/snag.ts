@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 
-export type SnagItem = { id: string; title: string; summary: string; sourceType: 'TikTok' | 'YouTube' | 'Web'; sourceUrl: string; thumbnailUrl?: string; transcript: string; stage: 'Worth Acting On' | 'Reference' | 'Inbox'; status: 'inbox' | 'in progress' | 'done' | 'archived'; snoozedUntil?: number; action: string; actionType: string; impact: number; effort: number; savedAt: string; keyIdeas: string[]; whyItMatters: string; recommendations: string[]; tags: string[]; done?: boolean };
+export type SnagItem = { id: string; title: string; summary: string; sourceType: 'TikTok' | 'YouTube' | 'Web'; sourceUrl: string; thumbnailUrl?: string; transcript: string; stage: 'Worth Acting On' | 'Reference' | 'Inbox'; status: 'inbox' | 'in progress' | 'done' | 'archived'; snoozedUntil?: number; analysisState: 'complete' | 'awaiting_ai'; action: string; actionType: string; impact: number; effort: number; savedAt: string; keyIdeas: string[]; whyItMatters: string; recommendations: string[]; tags: string[]; done?: boolean };
 type ItemUpdate = Partial<Pick<SnagItem, 'stage' | 'status'>> & { snooze_until?: number | null };
 type TagUpdate = { add_tags?: string[]; remove_tags?: string[] };
 
@@ -15,9 +15,9 @@ export class SnagCaptureError extends Error {
   }
 }
 const sampleItems: SnagItem[] = [
-  { id: 'sample-1', title: 'How a small product team uses customer language to make better landing pages.', summary: 'Save customer phrases before they get cleaned up. The wording is the signal.', sourceType: 'TikTok', sourceUrl: 'https://www.tiktok.com', transcript: 'The useful language is not the language you invent in a workshop. It is the language customers use when they explain the problem to each other. Save those phrases before they are polished away. The pattern you want is specific, emotional, and repeatable.', stage: 'Worth Acting On', status: 'inbox', action: 'Pull five phrases from recent conversations and test them in the Snag landing page.', actionType: 'Try this', impact: 5, effort: 2, savedAt: 'Today', keyIdeas: ['Raw customer language is more specific than a polished brand claim.', 'The most useful phrases show up in support and sales conversations.'], whyItMatters: 'Snag needs a message that makes people feel seen in the first few seconds.', recommendations: ['Pull five phrases from recent conversations.', 'Test one phrase in the Snag landing-page headline.'], tags: ['positioning', 'copywriting'] },
-  { id: 'sample-2', title: 'A simpler way to turn saved content into a weekly idea list.', summary: 'A light review ritual keeps the library useful without becoming another inbox.', sourceType: 'YouTube', sourceUrl: 'https://www.youtube.com', transcript: 'A saved library only becomes valuable when you return to it. Keep the ritual small. Once a week, open the list, pick one thing worth moving forward, and leave the rest alone. The goal is not perfect organization. The goal is a better next decision.', stage: 'Worth Acting On', status: 'inbox', action: 'Block 20 minutes Friday to select the one saved idea worth acting on next week.', actionType: 'Make a ritual', impact: 4, effort: 2, savedAt: 'Yesterday', keyIdeas: ['The library needs a review habit, not more organization.', 'One good decision is more valuable than revisiting everything.'], whyItMatters: 'This is the behavior Snag should make effortless once people have a library.', recommendations: ['Block 20 minutes Friday for your weekly review.', 'Select one saved idea to act on next week.'], tags: ['habit', 'product'] },
-  { id: 'sample-3', title: 'Why the best capture tools disappear until you need your ideas back.', summary: 'Fast capture works only when retrieval feels calm and obvious.', sourceType: 'Web', sourceUrl: 'https://example.com', transcript: 'Capture should take one move from the app where the idea appeared. Retrieval should be quiet. When someone opens the library, they should see useful material and a clear next action, not a system to maintain.', stage: 'Reference', status: 'inbox', action: '', actionType: 'Just reference', impact: 3, effort: 1, savedAt: 'Aug 29', keyIdeas: ['Capture needs to disappear into the operating system.', 'Retrieval should feel lighter than a folder tree.'], whyItMatters: 'The mobile UI needs to get out of the way while making saved material easy to reopen.', recommendations: [], tags: ['ux', 'research'] },
+  { id: 'sample-1', title: 'How a small product team uses customer language to make better landing pages.', summary: 'Save customer phrases before they get cleaned up. The wording is the signal.', sourceType: 'TikTok', sourceUrl: 'https://www.tiktok.com', transcript: 'The useful language is not the language you invent in a workshop. It is the language customers use when they explain the problem to each other. Save those phrases before they are polished away. The pattern you want is specific, emotional, and repeatable.', stage: 'Worth Acting On', status: 'inbox', analysisState: 'complete', action: 'Pull five phrases from recent conversations and test them in the Snag landing page.', actionType: 'Try this', impact: 5, effort: 2, savedAt: 'Today', keyIdeas: ['Raw customer language is more specific than a polished brand claim.', 'The most useful phrases show up in support and sales conversations.'], whyItMatters: 'Snag needs a message that makes people feel seen in the first few seconds.', recommendations: ['Pull five phrases from recent conversations.', 'Test one phrase in the Snag landing-page headline.'], tags: ['positioning', 'copywriting'] },
+  { id: 'sample-2', title: 'A simpler way to turn saved content into a weekly idea list.', summary: 'A light review ritual keeps the library useful without becoming another inbox.', sourceType: 'YouTube', sourceUrl: 'https://www.youtube.com', transcript: 'A saved library only becomes valuable when you return to it. Keep the ritual small. Once a week, open the list, pick one thing worth moving forward, and leave the rest alone. The goal is not perfect organization. The goal is a better next decision.', stage: 'Worth Acting On', status: 'inbox', analysisState: 'complete', action: 'Block 20 minutes Friday to select the one saved idea worth acting on next week.', actionType: 'Make a ritual', impact: 4, effort: 2, savedAt: 'Yesterday', keyIdeas: ['The library needs a review habit, not more organization.', 'One good decision is more valuable than revisiting everything.'], whyItMatters: 'This is the behavior Snag should make effortless once people have a library.', recommendations: ['Block 20 minutes Friday for your weekly review.', 'Select one saved idea to act on next week.'], tags: ['habit', 'product'] },
+  { id: 'sample-3', title: 'Why the best capture tools disappear until you need your ideas back.', summary: 'Fast capture works only when retrieval feels calm and obvious.', sourceType: 'Web', sourceUrl: 'https://example.com', transcript: 'Capture should take one move from the app where the idea appeared. Retrieval should be quiet. When someone opens the library, they should see useful material and a clear next action, not a system to maintain.', stage: 'Reference', status: 'inbox', analysisState: 'complete', action: '', actionType: 'Just reference', impact: 3, effort: 1, savedAt: 'Aug 29', keyIdeas: ['Capture needs to disappear into the operating system.', 'Retrieval should feel lighter than a folder tree.'], whyItMatters: 'The mobile UI needs to get out of the way while making saved material easy to reopen.', recommendations: [], tags: ['ux', 'research'] },
 ];
 
 function sourceTypeFromUrl(url: string): SnagItem['sourceType'] { const value = url.toLowerCase(); return value.includes('tiktok') ? 'TikTok' : value.includes('youtu') ? 'YouTube' : 'Web'; }
@@ -30,7 +30,8 @@ function mapItem(item: Record<string, unknown>): SnagItem {
   const status = item.status === 'in progress' || item.status === 'done' || item.status === 'archived' ? item.status : 'inbox';
   const snoozedUntil = Number(item.snooze_until ?? 0) || undefined;
   const sourceUrl = String(item.source_url ?? '');
-  return { id: String(item.id), title: firstSentence(item.summary), summary: String(item.summary ?? ''), sourceType: sourceTypeFromUrl(sourceUrl), sourceUrl, thumbnailUrl: String(item.thumbnail_url ?? '') || youtubeThumbnail(sourceUrl), transcript: String(item.transcript ?? ''), stage: item.stage === 'Worth Acting On' || item.stage === 'Reference' ? item.stage : 'Inbox', status, snoozedUntil, action: recommendations[0] ?? '', actionType: String(item.action_type ?? 'Just reference'), impact: Number(item.impact ?? 3), effort: Number(item.effort ?? 3), savedAt: item.ts ? new Date(Number(item.ts) * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently', keyIdeas, whyItMatters: String(item.why_it_matters ?? ''), recommendations, tags, done: status === 'done' };
+  const analysisState = item.analysis_state === 'awaiting_ai' ? 'awaiting_ai' : 'complete';
+  return { id: String(item.id), title: firstSentence(item.summary), summary: String(item.summary ?? ''), sourceType: sourceTypeFromUrl(sourceUrl), sourceUrl, thumbnailUrl: String(item.thumbnail_url ?? '') || youtubeThumbnail(sourceUrl), transcript: String(item.transcript ?? ''), stage: item.stage === 'Worth Acting On' || item.stage === 'Reference' ? item.stage : 'Inbox', status, snoozedUntil, analysisState, action: recommendations[0] ?? '', actionType: String(item.action_type ?? 'Just reference'), impact: Number(item.impact ?? 3), effort: Number(item.effort ?? 3), savedAt: item.ts ? new Date(Number(item.ts) * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recently', keyIdeas, whyItMatters: String(item.why_it_matters ?? ''), recommendations, tags, done: status === 'done' };
 }
 
 export function useSnagLibrary() {
@@ -92,8 +93,15 @@ export function useSnagLibrary() {
   }, []);
   const addTag = useCallback((id: string, tag: string) => updateTags(id, { add_tags: [tag] }), [updateTags]);
   const removeTag = useCallback((id: string, tag: string) => updateTags(id, { remove_tags: [tag] }), [updateTags]);
+  const reanalyzeItem = useCallback(async (id: string) => {
+    const response = await fetch(`${API_BASE}/api/items/${id}/reanalyze`, { method: 'POST', headers: LOCAL_API_HEADERS, body: '{}' });
+    if (!response.ok) throw new Error('Retry failed');
+    const updated = mapItem((await response.json()) as Record<string, unknown>);
+    setItems((current) => current.map((item) => item.id === id ? updated : item));
+    await refresh();
+  }, [refresh]);
   const actionQueue = useMemo(() => items.filter((item) => item.status !== 'archived' && item.stage === 'Worth Acting On' && !item.done && (!item.snoozedUntil || item.snoozedUntil < currentTime)).sort((a, b) => b.impact / b.effort - a.impact / a.effort), [currentTime, items]);
-  return { items, actionQueue, isRefreshing, refresh, markDone, snoozeItem, updateItem, addTag, removeTag };
+  return { items, actionQueue, isRefreshing, refresh, markDone, snoozeItem, updateItem, addTag, removeTag, reanalyzeItem };
 }
 
 export async function captureUrl(url: string) { const response = await fetch(`${API_BASE}/api/capture`, { method: 'POST', headers: LOCAL_API_HEADERS, body: JSON.stringify({ url }) }); if (!response.ok) throw new Error('Capture failed'); return response.json(); }
@@ -122,13 +130,13 @@ export async function captureAndSave(url: string) {
     throw new SnagCaptureError(failure.error || 'Snag could not analyze this link.', failure.kind);
   }
   const capture = await previewResponse.json() as {
-    preview?: { note: Record<string, unknown>; triage: Record<string, unknown>; transcript: string; content_type: string; url: string; thumbnail_url?: string };
+    preview?: { note: Record<string, unknown>; triage: Record<string, unknown>; transcript: string; content_type: string; url: string; thumbnail_url?: string; analysis_state?: 'complete' | 'awaiting_ai' };
   };
   const preview = capture.preview;
   if (!preview) throw new SnagCaptureError('Snag received an incomplete capture response.');
   const saveResponse = await fetch(`${API_BASE}/api/items`, {
     method: 'POST', headers: LOCAL_API_HEADERS,
-    body: JSON.stringify({ url: preview.url, note: preview.note, triage: preview.triage, transcript: preview.transcript, content_type: preview.content_type, thumbnail_url: preview.thumbnail_url }),
+    body: JSON.stringify({ url: preview.url, note: preview.note, triage: preview.triage, transcript: preview.transcript, content_type: preview.content_type, thumbnail_url: preview.thumbnail_url, analysis_state: preview.analysis_state }),
   });
   if (!saveResponse.ok) throw new SnagCaptureError('Snag analyzed the link, but could not save it.');
   return saveResponse.json() as Promise<{ id: string | number; duplicate: boolean }>;

@@ -14,11 +14,12 @@ const ASK_STARTERS = ['What should I take from this?', 'What is the next action?
 
 export default function SavedItemScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { items, addTag, removeTag, updateItem } = useSnagLibrary();
+  const { items, addTag, removeTag, reanalyzeItem, updateItem } = useSnagLibrary();
   const item = items.find((candidate) => candidate.id === id);
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isAsking, setIsAsking] = useState(false);
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
   const [error, setError] = useState('');
 
   async function ask() {
@@ -40,6 +41,19 @@ export default function SavedItemScreen() {
   async function openOriginal() {
     if (!item?.sourceUrl) return;
     await Linking.openURL(item.sourceUrl);
+  }
+
+  async function retryAnalysis() {
+    if (!item || isReanalyzing) return;
+    setError('');
+    setIsReanalyzing(true);
+    try {
+      await reanalyzeItem(item.id);
+    } catch {
+      setError('AI analysis is still unavailable. Try again in a moment.');
+    } finally {
+      setIsReanalyzing(false);
+    }
   }
 
   function manageItem() {
@@ -88,6 +102,7 @@ export default function SavedItemScreen() {
         <SourcePreview item={item} />
         <Text style={styles.title}>{item.title}</Text>
         <Text style={styles.summary}>{item.summary}</Text>
+        {item.analysisState === 'awaiting_ai' ? <View style={styles.pendingPanel}><Text style={styles.pendingTitle}>Awaiting AI analysis</Text><Text style={styles.pendingBody}>Your source is saved. Snag can retry the analysis when AI is available.</Text><Pressable accessibilityLabel="Retry analysis" disabled={isReanalyzing} onPress={() => void retryAnalysis()} style={({ pressed }) => [styles.retryButton, isReanalyzing && styles.retryDisabled, pressed && styles.pressed]}>{isReanalyzing ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.retryText}>Retry analysis</Text>}</Pressable></View> : null}
         <View style={styles.sourceActions}>
           {item.sourceUrl ? <Pressable accessibilityLabel="Open original source" onPress={() => void openOriginal()} style={({ pressed }) => [styles.sourceAction, pressed && styles.pressed]}><SymbolView name="arrow.up.right.square" size={15} tintColor={Colors.light.text} /><Text style={styles.sourceActionText}>Original</Text></Pressable> : null}
           <Pressable accessibilityLabel="Read transcript" onPress={() => router.push({ pathname: '/item/[id]/transcript', params: { id: item.id } })} style={({ pressed }) => [styles.sourceAction, pressed && styles.pressed]}><SymbolView name="text.alignleft" size={15} tintColor={Colors.light.text} /><Text style={styles.sourceActionText}>Transcript</Text></Pressable>
@@ -115,5 +130,6 @@ const styles = StyleSheet.create({
   sourceActions: { flexDirection: 'row', gap: 8, marginTop: -8 }, sourceAction: { alignItems: 'center', backgroundColor: Colors.light.surface, borderColor: Colors.light.border, borderCurve: 'continuous', borderRadius: 999, borderWidth: 1, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 9 }, sourceActionText: { color: Colors.light.text, fontSize: 13, fontWeight: '700' },
   section: { gap: 11 }, sectionTitle: { color: Colors.light.text, fontSize: 16, fontWeight: '800' }, body: { color: Colors.light.text, flex: 1, fontSize: 16, lineHeight: 24 }, bulletRow: { alignItems: 'flex-start', flexDirection: 'row', gap: 10 }, bullet: { backgroundColor: Colors.light.accentSoft, borderRadius: 999, color: Colors.light.accent, fontSize: 11, fontWeight: '800', height: 21, overflow: 'hidden', paddingTop: 3, textAlign: 'center', width: 21 }, recommendation: { alignItems: 'flex-start', backgroundColor: Colors.light.accentSoft, borderCurve: 'continuous', borderRadius: Radius.large, flexDirection: 'row', gap: 10, padding: 15 }, recommendationText: { color: Colors.light.text, flex: 1, fontSize: 15, fontWeight: '600', lineHeight: 22 },
   askIntro: { color: Colors.light.muted, fontSize: 14, lineHeight: 20 }, askStarters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, askStarter: { backgroundColor: Colors.light.surface, borderColor: Colors.light.border, borderCurve: 'continuous', borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8 }, askStarterActive: { backgroundColor: Colors.light.accentSoft, borderColor: Colors.light.accent }, askStarterText: { color: Colors.light.muted, fontSize: 12, fontWeight: '700' }, askStarterTextActive: { color: Colors.light.accent }, composer: { alignItems: 'flex-end', backgroundColor: Colors.light.surface, borderColor: Colors.light.border, borderCurve: 'continuous', borderRadius: Radius.large, borderWidth: 1, flexDirection: 'row', gap: 8, padding: 10 }, input: { color: Colors.light.text, flex: 1, fontSize: 15, lineHeight: 21, maxHeight: 100, minHeight: 41, paddingHorizontal: 4, paddingTop: 10 }, askButton: { alignItems: 'center', backgroundColor: Colors.light.accent, borderRadius: 999, height: 40, justifyContent: 'center', width: 40 }, askDisabled: { backgroundColor: Colors.light.placeholder }, error: { color: '#B34B43', fontSize: 13, lineHeight: 19 }, message: { backgroundColor: Colors.light.wash, borderCurve: 'continuous', borderRadius: Radius.large, gap: 8, padding: 15 }, question: { color: Colors.light.accent, fontSize: 13, fontWeight: '800' }, quickRead: { color: Colors.light.muted, fontSize: 10, fontWeight: '800', letterSpacing: 1.1, marginTop: -4 }, answer: { color: Colors.light.text, fontSize: 15, lineHeight: 22 },
+  pendingPanel: { backgroundColor: Colors.light.accentSoft, borderCurve: 'continuous', borderRadius: Radius.large, gap: 9, padding: 16 }, pendingTitle: { color: Colors.light.accent, fontSize: 15, fontWeight: '800' }, pendingBody: { color: Colors.light.text, fontSize: 14, lineHeight: 20 }, retryButton: { alignItems: 'center', alignSelf: 'flex-start', backgroundColor: Colors.light.accent, borderRadius: 999, minHeight: 38, paddingHorizontal: 14, justifyContent: 'center' }, retryDisabled: { opacity: 0.65 }, retryText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, tag: { backgroundColor: Colors.light.wash, borderCurve: 'continuous', borderRadius: 999, overflow: 'hidden', paddingHorizontal: 10, paddingVertical: 6 }, tagText: { color: Colors.light.muted, fontSize: 12, fontWeight: '700' }, addTag: { alignItems: 'center', borderColor: Colors.light.accentSoft, borderCurve: 'continuous', borderRadius: 999, borderWidth: 1, flexDirection: 'row', gap: 4, paddingHorizontal: 10, paddingVertical: 6 }, addTagText: { color: Colors.light.accent, fontSize: 12, fontWeight: '800' }, missing: { alignItems: 'center', backgroundColor: Colors.light.background, flex: 1, justifyContent: 'center', padding: Spacing.four }, missingText: { color: Colors.light.muted, fontSize: 16 }, pressed: { opacity: 0.72, transform: [{ scale: 0.985 }] },
 });
