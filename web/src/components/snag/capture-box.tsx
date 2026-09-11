@@ -71,14 +71,21 @@ export function CaptureBox() {
   const item = preview ? previewToItem(preview) : null;
 
   return (
-    <div className="space-y-5">
+    <div className="rounded-[22px] border border-border bg-surface p-4 shadow-[0_1px_1px_rgba(30,45,41,0.03)] md:p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium">Save from anywhere</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Use your iPhone share sheet, or paste a link here.</p>
+        </div>
+        <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-accent">Capture</span>
+      </div>
       <form onSubmit={onCapture} className="flex gap-2">
         <input
           type="text"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="Paste a link — TikTok, YouTube, an article, a post…"
-          className="min-w-0 flex-1 rounded-[4px] border border-border bg-transparent px-3.5 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-accent"
+          className="min-w-0 flex-1 rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-accent"
           aria-label="Link to capture"
         />
         <PrimaryButton type="submit" disabled={busy || !url.trim()}>
@@ -95,7 +102,7 @@ export function CaptureBox() {
       {saved && <p className="text-sm text-foreground/80">Saved to your vault.</p>}
 
       {item && (
-        <div className="rounded-md border border-border bg-surface p-5 md:p-6">
+        <div className="mt-5 rounded-2xl border border-border bg-background p-5 md:p-6">
           <div className="space-y-3 border-b border-border pb-4">
             <SourceLine
               sourceType={item.sourceType}

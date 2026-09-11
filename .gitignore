@@ -4,6 +4,7 @@
 # Runtime data (personal vault + backups) — NEVER commit
 data/
 logs/
+.linear_bridge_state.json
 
 # Dashboard build artifacts (exported vault content) — NEVER commit
 dashboard/data.json

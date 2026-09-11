@@ -89,3 +89,11 @@ within the active slice when it blocks use.
 - Signed iOS Share Sheet capture for TikTok, YouTube, Safari, Instagram, and
   Facebook.
 - Shareable text, collections, export, trash, digest, settings, and quota.
+- Public Snag API for a user's own agents: scoped access tokens plus endpoints
+  to save a source, list/search saved ideas, retrieve an item, and ask over the
+  library. Build this after user identity and account isolation exist.
+- Bring-your-own AI provider: let a user route enrichment to their own OpenAI
+  or Anthropic API project. This reduces Snag's model cost but does not use a
+  ChatGPT or Claude chat subscription; API billing stays with the provider
+  account. Keys must be stored server-side with encryption, revocation, and
+  per-user spend limits, never in the mobile app.

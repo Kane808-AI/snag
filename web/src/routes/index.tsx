@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useSnag } from "@/lib/snag-store";
 import { ItemRow } from "@/components/snag/item-row";
 import { CaptureBox } from "@/components/snag/capture-box";
+import { ArrowUpRight, Sparkles } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -23,39 +25,58 @@ export const Route = createFileRoute("/")({
 });
 
 function InboxPage() {
-  const { captures } = useSnag();
+  const { captures, actionQueue } = useSnag();
+  const navigate = useNavigate();
+  const topAction = actionQueue[0];
 
   return (
-    <div className="space-y-10">
-      <header>
-        <h1 className="text-2xl font-semibold md:text-3xl">Inbox</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Every save becomes a sourced note and a clear next step.
+    <div className="space-y-8 md:space-y-10">
+      <header className="snag-enter">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Your library</p>
+        <h1 className="mt-2 text-3xl font-semibold leading-[1.05] md:text-5xl">Ideas worth keeping.</h1>
+        <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
+          Everything you share lands here, organized into one place.
         </p>
       </header>
 
-      <div className="rounded-md border border-border bg-surface p-5 md:p-6">
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          Paste a link to turn it into a sourced note with one recommended next
-          action, then save it to your vault. The Telegram bot captures the same
-          way, so both surfaces stay in sync.
-        </p>
-      </div>
+      {topAction ? (
+        <button
+          onClick={() => navigate({ to: "/item/$id", params: { id: topAction.id } })}
+          className="group relative w-full overflow-hidden rounded-[26px] bg-foreground p-5 text-left text-surface shadow-[0_16px_40px_rgba(29,45,40,0.16)] transition-transform hover:-translate-y-0.5 md:p-7"
+        >
+          <div className="absolute -right-12 -top-14 h-44 w-44 rounded-full bg-accent/30 blur-2xl" />
+          <div className="relative flex items-start justify-between gap-5">
+            <div>
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-secondary">
+                <Sparkles className="h-3.5 w-3.5" /> Act now
+              </span>
+              <p className="mt-4 max-w-xl font-display text-xl font-medium leading-snug md:text-2xl">{topAction.action}</p>
+              <p className="mt-2 text-sm text-surface/60">From {topAction.sourceType} · {topAction.title}</p>
+            </div>
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-surface/10 transition-colors group-hover:bg-surface/20"><ArrowUpRight className="h-5 w-5" /></span>
+          </div>
+        </button>
+      ) : (
+        <div className="rounded-[26px] bg-secondary p-5 md:p-7">
+          <p className="font-display text-xl font-medium">Your next good idea is one share away.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Use the share sheet in any app to send something to Snag.</p>
+        </div>
+      )}
 
       <CaptureBox />
 
       <section>
-        <div className="flex items-baseline justify-between border-b border-border pb-2">
-          <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Recent captures
+        <div className="flex items-baseline justify-between px-1 pb-1">
+          <h2 className="font-display text-xl font-medium">
+            Saved recently
           </h2>
-          <span className="text-[11px] tabular-nums text-muted-foreground/70">
-            {captures.length}
+          <span className="text-xs text-muted-foreground">
+            {captures.length} saved
           </span>
         </div>
         <div>
           {captures.length === 0 ? (
-            <div className="rounded-md border border-dashed border-border px-5 py-14 text-center">
+            <div className="rounded-[22px] border border-dashed border-border bg-surface px-5 py-14 text-center">
               <p className="text-sm text-muted-foreground">
                 Nothing captured yet. Paste a link above, or send one to the bot, and it
                 will show up here.

@@ -33,6 +33,12 @@ DeepSeek), a SQLite vault, no ClickUp, and an Actions queue no competitor ships.
 - The web app and native share-sheet capture are on the roadmap, gated on validation.
 - TikTok links only for now. Other sources come later.
 
+## Operations
+
+Snag work is controlled in Linear and executed through Hermes Kanban. See
+[`docs/LINEAR_HERMES_PLAYBOOK.md`](docs/LINEAR_HERMES_PLAYBOOK.md) for the
+intake gate, status mapping, and safe operating rhythm.
+
 ## How it's built
 
 - Telegram bot (long polling), stdlib Python, launchd on macOS.

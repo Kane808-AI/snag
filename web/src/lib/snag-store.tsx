@@ -189,6 +189,18 @@ export function previewToItem(p: CapturePreview): SnagItem {
   });
 }
 
+export function buildActionQueue(items: SnagItem[]): SnagItem[] {
+  return items
+    .filter((item) => item.stage === "Worth Acting On" && !item.done)
+    .map((item, index) => ({ item, index }))
+    .sort(
+      (a, b) =>
+        b.item.impact / b.item.effort - a.item.impact / a.item.effort ||
+        a.index - b.index,
+    )
+    .map(({ item }) => item);
+}
+
 type SnagContextValue = {
   items: SnagItem[];
   captures: SnagItem[];
@@ -267,9 +279,7 @@ export function SnagProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const value = useMemo<SnagContextValue>(() => {
-    const actionQueue = items
-      .filter((i) => i.stage === "Worth Acting On" && !i.done)
-      .sort((a, b) => b.impact / b.effort - a.impact / a.effort);
+    const actionQueue = buildActionQueue(items);
     return {
       items,
       captures: items.slice(0, 6),
