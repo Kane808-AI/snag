@@ -1,50 +1,60 @@
 # Snag
 
-Turn a saved TikTok into your next action.
+Save anything. Get the idea back.
 
-Snag is a capture app. Send it a TikTok link (or upload the video file), and it
-returns the transcript, an AI-written note, and a triage pass. Save it to a
-searchable vault, and an Actions queue surfaces what to do next.
+Snag is a capture app with one job: turn anything you save into something you can
+actually use. Send it a link or a file and it comes back with a summary, the key
+ideas, why it matters, and a triage that tells you what to do next. Everything
+lands in a searchable vault, so nothing you save dies in a folder.
+
+Two surfaces drive one pipeline: a Telegram bot and a local web app.
 
 ## The loop
 
-Save → Transcribe → Understand → Act.
+Save, extract, understand, recommend.
 
-1. Send a TikTok link or video file to the bot.
-2. It transcribes the audio (ElevenLabs server-side, falling back to local faster-whisper).
-3. DeepSeek writes the note (summary, key ideas, why it matters, recommendations, tags) and the triage (stage, action type, impact, effort).
-4. Save it, search it, and act on it from the Actions queue.
+1. **Save.** Send a link (TikTok, YouTube, X, Instagram, Facebook, any article)
+   or upload a file.
+2. **Extract.** Video is transcribed locally with faster-whisper. YouTube uses
+   native captions. Text is pulled straight off the page. There is no paid
+   speech-to-text anywhere in the pipeline.
+3. **Understand.** DeepSeek writes the note: summary, key ideas, why it worked,
+   why it matters, a reusable pattern, recommendations, and tags. A second pass
+   adds a triage: stage, action type, impact, and effort. Real view, like, and
+   save counts pulled from the source ground the impact score, so it reflects
+   proven reach instead of a guess.
+4. **Recommend.** Two to four concrete next actions, saved to the vault with the
+   full transcript.
 
 ## Why it exists
 
 Saved folders are where ideas go to die. Snag forces a decision on every save:
-act on it, reference it, or file it.
+act on it, reference it, or file it. The name is the product. Snag it all.
 
-## Lineage
+## Architecture
 
-Snag is v2 of TikTok Brain, an OpenClaw-era capture → transcribe → categorize
-pipeline with a ClickUp-backed triage dashboard. Snag is the same loop rebuilt
-as a standalone consumer product: text-only and cost-first (ElevenLabs +
-DeepSeek), a SQLite vault, no ClickUp, and an Actions queue no competitor ships.
+Three tiers, one pipeline.
 
-## Current state
+- `service.py`: the pure capture pipeline, zero Telegram imports.
+  `capture_url`, `capture_file`, and `capture_text` each return a `CaptureResult`.
+- `bot.py`: a thin Telegram adapter over the service.
+- `webview/` and `web/`: a localhost web API and a TanStack Start frontend.
 
-- Live and dogfooded on Telegram. TikTok links and video files work.
-- The web app and native share-sheet capture are on the roadmap, gated on validation.
-- TikTok links only for now. Other sources come later.
+Supporting modules: `ingest.py` (yt-dlp plus ScrapeCreators and ScrapTik
+failover), `social_capture.py` (Playwright for Instagram and Facebook),
+`analyze.py` (faster-whisper plus DeepSeek), and `db.py` (SQLite vault with FTS5
+search).
 
-## Operations
+Cost first by design: text only analysis, free transcription, no multimodal
+model. The original build sent every video to a multimodal model and paid per
+minute of transcription. Those paths are gone.
 
-Snag work is controlled in Linear and executed through Hermes Kanban. See
-[`docs/LINEAR_HERMES_PLAYBOOK.md`](docs/LINEAR_HERMES_PLAYBOOK.md) for the
-intake gate, status mapping, and safe operating rhythm.
+## Built by an AI agent team
 
-## How it's built
-
-- Telegram bot (long polling), stdlib Python, launchd on macOS.
-- ElevenLabs server-side transcription (fast path) plus local faster-whisper fallback.
-- DeepSeek for note and triage, text-only, no vision.
-- SQLite vault (users, usage, vault, jobs) with an async job queue.
+Snag is developed by a small team of AI agents orchestrated through Hermes and a
+Kanban board. Work lands as pull requests: a Builder agent opens a feature branch
+and a PR, a Verify agent runs QA, and changes merge on approval. Every feature
+commit in this repo is the output of that loop.
 
 ## Run it
 
@@ -54,8 +64,14 @@ python3 test_pipeline.py "https://www.tiktok.com/t/XXXX"
 python3 bot.py
 ```
 
+Tests:
+
+```bash
+pytest -q                        # 157 tests
+```
+
 See `.env.example` for the required keys. Transcription needs `faster-whisper`
-and `ffmpeg`; TikTok download fallback needs `yt-dlp`. Tests: `pytest -q`.
+and `ffmpeg`. TikTok download fallback needs `yt-dlp`.
 
 ## Find Snag
 
