@@ -19,7 +19,7 @@ This is a capture app, not a social app. The job is to make anything you save co
 
 ## 2. Target user
 
-**Primary user is Chris.** The analysis prompts are personalized to his four businesses and the triage rubric scores against them. This is a dogfooded solo-founder tool first.
+**Primary user is Chris.** The analysis prompts are personalized to his active business and content priorities, and the triage rubric scores against them. This is a dogfooded solo founder tool first.
 
 The persona that generalizes: a solo operator running multiple businesses who saves links, posts, and videos from everywhere, never revisits them, and loses ideas in the saved-folder graveyard. The bot answers for them the way it answers for Chris: what is this, does it matter to my businesses, and what do I do next.
 
@@ -31,8 +31,8 @@ Save → Extract → Understand → Recommend.
 
 1. **Save.** User sends a link or uploads a file to the bot. Quota is checked before work starts.
 2. **Extract (transcribe).** Transcription is free, no paid speech-to-text. YouTube uses native captions via yt-dlp (fast, any length). Everything else (TikTok, other video, uploaded files) downloads via 3-tier adapter failover (ScrapeCreators → ScrapTik/RapidAPI → yt-dlp) and transcribes locally with faster-whisper (`small`, CPU int8) after normalizing audio to 16kHz mono WAV with ffmpeg. Text content (articles, posts) is extracted as text, no transcription.
-3. **Understand.** DeepSeek text analysis, two passes. Pass one (`analyze_note`): summary, key ideas, why it worked (content craft: hook, structure, trigger), why it matters for Chris's businesses, reusable pattern (a [placeholder] template to steal), recommendations, tags. Pass two (`analyze_triage`, runs on save): stage (Worth Acting On / Reference / Inbox), action type (Build a tool / Make content / Test a strategy / Buy or try a tool / Just reference), impact 1-5, effort 1-5. Real engagement (view/like/save counts pulled from the source) grounds both passes, so impact reflects proven reach, not a guess.
-4. **Recommend.** The note's Recommendations section lists 2-4 concrete numbered actions tied to his businesses. The note is shown in Telegram with a 💾 Save button. Saving stores the full enriched note, the triage, and the full transcript in the vault. Retrieval is `/vault` (recent 20) and `/search <word>` (substring match across summary, key ideas, why it worked, why it matters, reusable pattern, recommendations, tags).
+3. **Understand.** DeepSeek text analysis, two passes. Pass one (`analyze_note`): summary, key ideas, why it worked (content craft: hook, structure, trigger), why it matters for Chris's active priorities, reusable pattern (a [placeholder] template to steal), recommendations, tags. Pass two (`analyze_triage`, runs on save): stage (Worth Acting On / Reference / Inbox), action type (Build a tool / Make content / Test a strategy / Buy or try a tool / Just reference), impact 1-5, effort 1-5. Real engagement (view/like/save counts pulled from the source) grounds both passes, so impact reflects proven reach, not a guess.
+4. **Recommend.** The note's Recommendations section lists 2-4 concrete numbered actions tied to his active priorities. The note is shown in Telegram with a 💾 Save button. Saving stores the full enriched note, the triage, and the full transcript in the vault. Retrieval is `/vault` (recent 20) and `/search <word>` (substring match across summary, key ideas, why it worked, why it matters, reusable pattern, recommendations, tags).
 
 The loop is cost-first: text only, free transcription (YouTube captions + local faster-whisper), no multimodal model. The old build sent every video to multimodal Gemini and paid per-minute ElevenLabs transcription; both drove billing up. Those paths are gone.
 
@@ -48,8 +48,8 @@ The loop is cost-first: text only, free transcription (YouTube captions + local 
 
 **Analysis**
 - DeepSeek text-only (`deepseek-v4-flash` default, temperature 0.3, max 4096 tokens). JSON mode for triage.
-- Note output: Summary, Key Ideas, Why It Matters, Recommendations, Tags. One prompt, personalized to Chris's four businesses (Brand75, SalesBridge, Callahan Law SEO, his AI TikTok).
-- Triage output on save: stage, action type, impact, effort. Strict rubric, calibrated to be selective. Harsh impact scoring, "Worth Acting On" only for a concrete near-term move for one of his businesses.
+- Note output: Summary, Key Ideas, Why It Matters, Recommendations, Tags. One prompt, personalized to Chris's active business and content priorities without naming client relationships in public source.
+- Triage output on save: stage, action type, impact, effort. Strict rubric, calibrated to be selective. Harsh impact scoring, "Worth Acting On" only for a concrete near-term move tied to an active priority.
 - Failure defaults: analysis failure shows a friendly retry message; triage failure defaults to Inbox / Just reference / 3 / 3 rather than blocking the save.
 
 **Freemium gate**
