@@ -77,3 +77,13 @@ and `ffmpeg`. TikTok download fallback needs `yt-dlp`.
 
 - Telegram: @snagcapturebot
 - X: @snagcapture
+
+## Work with me
+
+I build and operate AI operations systems: agent workflows, intake and CRM
+automation, and the approval and verification controls that keep them safe to
+run. I take on contract work through [Brand75](https://brand75.com), and I am
+also open to full time roles.
+
+- **Website:** https://chriskaneshiro.com
+- **Agency:** https://brand75.com
